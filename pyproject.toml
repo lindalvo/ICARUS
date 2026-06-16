@@ -1,0 +1,28 @@
+[project]
+name = "ICARUS"
+version = "0.1.0"
+description = "Impact of Clustering Alternatives for Radio Unit Selection"
+authors = [
+    {name = "Lindalvo Neto",email = "netobrpa@gmail.com"}
+]
+packages = [{ include = "src" }]
+readme = "README.md"
+requires-python = ">=3.11,<4"
+dependencies = [
+    "unidecode (>=1.3,<2.0)",
+    "pandas (>=2.3,<3.0)",
+    "requests (>=2.32.5,<3.0.0)",
+    "folium (>=0.20.0,<0.21.0)",
+    "pulp (>=3.3.0,<4.0.0)",
+    "pymoo (>=0.6.1.6,<0.7.0.0)",
+    "scikit-learn (>=1.8.0,<2.0.0)",
+    "pyomo (>=6.9.5,<7.0.0)",
+    "cplex (>=22.1.2.0,<23.0.0.0)",
+    "highspy (>=1.12.0,<2.0.0)",
+    "chardet",
+    "gurobipy (>=13.0.1,<14.0.0)"
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
