@@ -9,11 +9,9 @@ MAPS_DIR = PROJECT_ROOT / "MAPS"
 
 # Subdiretórios de dados
 ANATEL_DATA_DIR = PROJECT_ROOT / "ANATEL"
-Filename = "50409307637_3303302"
+Filename = "50418418705_3170206"
 # Constantes físicas / de modelo
 MAX_FIBER_DISTANCE_KM: float = 9.0
 MAX_LOAD: int = 250  # Soma máxima de Frequências das bandas em MHz das RUs associadas a mesma DU
 MAX_CLUSTER_SIZE: int = 5
 FIBER_DELAY_US_PER_KM: float = 5.0
-
-
