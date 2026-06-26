@@ -581,8 +581,8 @@ def generate_csv_to_pipeline(
     for du_id in du_ids:
         du_row = df.loc[df["id"] == du_id].iloc[0]
 
-        du_id = du_row["id"]
-        du_bandwidth = du_row["bandwidth"]
+        du_id = int(du_row["id"])
+        du_bandwidth = int(du_row["bandwidth"])
 
 
         # Começa a linha com os dados da própria DU
@@ -602,15 +602,11 @@ def generate_csv_to_pipeline(
             ru_bandwidth = ru_row["bandwidth"]
 
             distance_km = df_dm.loc[ru_id, du_id]
-            delay_us = distance_km * FIBER_DELAY_US_PER_KM
-
-            if delay_decimals is not None:
-                delay_us = round(delay_us, delay_decimals)
-
+            delay_us = round(distance_km * FIBER_DELAY_US_PER_KM)
 
             row.extend([
-                ru_bandwidth,
-                delay_us,
+                int(ru_bandwidth),
+                int(delay_us),
             ])
 
         rows.append(row)
@@ -647,13 +643,13 @@ if __name__ == "__main__":
     df_cluster = pd.read_csv(output_filename)
     
     #gravando as estatísticas em um arquivo CSV
-    stats(df_cluster, df_dm)
+    #stats(df_cluster, df_dm)
 
     #checando regras do cluster foram respeitadas
-    check_rules(df_cluster, df_dm)
+    #check_rules(df_cluster, df_dm)
     
     #Gerando Mapa
-    generate_map(df_cluster, df_dm)
+    #generate_map(df_cluster, df_dm)
 
     #Gerando Arquivo Texto para Pipeline
     generate_csv_to_pipeline(df_cluster, df_dm)

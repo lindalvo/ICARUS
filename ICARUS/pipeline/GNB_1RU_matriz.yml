@@ -1,0 +1,131 @@
+cu_cp:
+  amf:
+    no_core: false
+cu_up:
+  ngu:
+    no_core: false
+  test_mode:
+    enable: true
+    integrity_enable: false
+    ciphering_enable: false
+
+ru_ofh:
+  ignore_ecpri_seq_id: true
+  t1a_max_cp_dl: 590
+  t1a_min_cp_dl: 250
+  t1a_max_cp_ul: 590
+  t1a_min_cp_ul: 150
+  t1a_max_up: 365
+  t1a_min_up: 80
+  ta4_max: 500
+  ta4_min: 10
+  is_prach_cp_enabled: false
+  compr_method_ul: bfp
+  compr_bitwidth_ul: 9
+  compr_method_dl: bfp
+  compr_bitwidth_dl: 9
+  compr_method_prach: bfp
+  compr_bitwidth_prach: 9
+  iq_scaling: 0.35
+  cells:
+    - network_interface: __DU_IF1__
+      ru_bandwidth_MHz: __RU1_BANDWIDTH_MHZ__
+      ru_mac_addr: "__RU1_MAC__"
+      du_mac_addr: "__DU_MAC1__"
+      dl_port_id: [__RU1_DL_PORT_ID__]
+      ul_port_id: [__RU1_UL_PORT_ID__]
+      prach_port_id: [__RU1_PRACH_PORT_ID__]
+      enable_promiscuous: true
+      check_link_status: false
+      mtu: 9000
+
+cell_cfg:
+  band: 78
+  nof_antennas_dl: 1
+  nof_antennas_ul: 1
+  common_scs: 30
+  plmn: "00101"
+  tac: 7
+  pci: 1
+  prach:
+    prach_config_index: 7
+    zero_correlation_zone: 0
+    prach_frequency_start: 8
+  tdd_ul_dl_cfg:
+    dl_ul_tx_period: 10
+    nof_dl_slots: 7
+    nof_dl_symbols: 6
+    nof_ul_slots: 2
+    nof_ul_symbols: 4
+
+cells:
+  - pci: 0
+    sector_id: 0
+    dl_arfcn: __RU1_DL_ARFCN__
+    channel_bandwidth_MHz: __RU1_BANDWIDTH_MHZ__
+    prach:
+      prach_root_sequence_index: 1
+
+metrics:
+  autostart_stdout_metrics: true
+  enable_json: true
+  layers:
+    enable_app_usage: true
+    enable_ngap: false
+    enable_e1ap: false
+    enable_pdcp: false
+    enable_rrc: false
+    enable_sched: true
+    enable_rlc: true
+    enable_mac: true
+    enable_executor: true
+    enable_du_low: true
+    enable_ru: true
+  periodicity:
+    app_usage_report_period: 5000
+    du_report_period: 5000
+remote_control:
+  bind_addr: 0.0.0.0
+  enabled: true
+
+test_mode:
+  test_ue:
+    rnti: 0x44
+    nof_ues: 1
+    ri: 1
+    cqi: 14
+    pusch_active: true
+    pdsch_active: true
+
+expert_execution:
+  cell_affinities:
+    - ru_cpus: 40,41
+      ru_pinning: mask
+  threads:
+    upper_phy:
+      pdsch_processor_type: flexible
+      pdsch_cb_batch_length: synchronous
+      max_pucch_concurrency: 1
+      max_pusch_and_srs_concurrency: 1
+      max_pdsch_concurrency: 1
+    lower_phy:
+      execution_profile: single
+
+  queues:
+    cu_up_dl_ue_executor_queue_size: 8192
+    cu_up_ul_ue_executor_queue_size: 8192
+    cu_up_ctrl_ue_executor_queue_size: 8192
+    cu_up_strand_batch_size: 256
+    du_ue_data_executor_queue_size: 16384
+
+log:
+  filename: /tmp/du__DU_ID__.log
+  all_level: error
+
+pcap:
+  mac_enable: false
+  mac_filename: /tmp/du_mac.pcap
+  f1ap_enable: false
+  f1ap_filename: /tmp/du_f1ap.pcap
+  f1u_enable: false
+  f1u_filename: /tmp/du_f1u.pcap
