@@ -40,12 +40,6 @@ TXQLEN=10000
 MAX_RUS=5
 VCPUS_TOTAL=48
 
-RU1_DL_ARFCN=625000
-RU2_DL_ARFCN=632628
-RU3_DL_ARFCN=637212
-RU4_DL_ARFCN=640000
-RU5_DL_ARFCN=650000
-
 echo "========================================"
 echo "Arquivo de entrada: $ARQUIVO"
 echo "Diretório do script: $SCRIPT_DIR"

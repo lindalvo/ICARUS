@@ -5,22 +5,21 @@ import atexit
 import ssl
 from datetime import datetime
 import os
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 import pandas as pd
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
 
-load_dotenv()
+load_dotenv(find_dotenv())
+
+env_var_names = list(os.environ)
+
+print(env_var_names)
 
 VCENTER_IP = os.environ["VCENTER_IP"]
-VCENTER_USER = os.environ["USER_VCENTER"]
+VCENTER_USER = os.environ["VCENTER_USER"]
 VCENTER_PASSWORD = os.environ["VCENTER_PASSWORD"]
-VM_NAME = os.environ["VM_NAME"]
-
-
-
-
-
+VM_NAME = os.environ["VCENTER_VM"]
 
 # Intervalo realtime típico do vSphere.
 # Use 20 se suas amostras no govc aparecem de 20 em 20 segundos.
@@ -50,7 +49,7 @@ def collect_vcenter_vm_metrics(start: str, end: str) -> pd.DataFrame:
 
     Retorna:
         pandas.DataFrame em formato longo:
-        timestamp_utc, interval_sec, vm, metric, value, unit
+        timestamp_utc, interval_sec, metric, value, unit
     """
 
     ssl_context = ssl._create_unverified_context()
@@ -198,8 +197,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     df_metrics = collect_vcenter_vm_metrics(
-        start=args.start,
-        end=args.end,
+        #start=args.start,
+        #end=args.end,
+        start="2026-06-27T13:01:00.000Z",
+        end="2026-06-27T14:01:00.000Z"
     )
 
     print(df_metrics)

@@ -4,13 +4,13 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
         {
             "name": "Python Debugger: Current File",
-            "type": "debugpy",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "justMyCode":true
+            "args": ["--start", "2026-06-29T12:00:00.000Z", "--end", "2026-06-29T13:00:00.000Z", "--roudtrip", "1", "--gnbid", "12345"]
         }
     ]
 }
