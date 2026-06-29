@@ -210,3 +210,7 @@ __marimo__/
 *.htm
 *.html
 ICARUS/OUT/*.*
+
+#ENV files
+.env
+*.env
