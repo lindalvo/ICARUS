@@ -3,7 +3,7 @@
 import argparse
 import atexit
 import ssl
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 from dotenv import find_dotenv, load_dotenv
 import pandas as pd
@@ -11,10 +11,6 @@ from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
 
 load_dotenv(find_dotenv())
-
-env_var_names = list(os.environ)
-
-print(env_var_names)
 
 VCENTER_IP = os.environ["VCENTER_IP"]
 VCENTER_USER = os.environ["VCENTER_USER"]
@@ -42,7 +38,7 @@ METRICS = [
 
 def collect_vcenter_vm_metrics(start: str, end: str) -> pd.DataFrame:
     """
-    Coleta métricas da VM gercom8 no vCenter entre start e end.
+    Coleta métricas da VM ICARUS no vCenter entre start e end.
 
     start/end no formato:
         2026-06-27T13:01:00.000Z
@@ -68,8 +64,10 @@ def collect_vcenter_vm_metrics(start: str, end: str) -> pd.DataFrame:
 
     # Converte as strings do bash para datetime UTC.
     # Mantém datetime "naive" em UTC, compatível com o padrão usado pelo pyVmomi.
-    start_time = datetime.strptime(start, "%Y-%m-%dT%H:%M:%S.000Z")
-    end_time = datetime.strptime(end, "%Y-%m-%dT%H:%M:%S.000Z")
+    start_time = datetime.strptime(start, "%Y-%m-%dT%H:%M:%S.000Z").replace(tzinfo=timezone.utc)
+    end_time = datetime.strptime(end, "%Y-%m-%dT%H:%M:%S.000Z").replace(tzinfo=timezone.utc)
+
+    print(f"Janela solicitada UTC: {start_time.isoformat()} até {end_time.isoformat()}")
 
     # Localiza a VM pelo nome.
     vm_view = content.viewManager.CreateContainerView(
@@ -81,10 +79,19 @@ def collect_vcenter_vm_metrics(start: str, end: str) -> pd.DataFrame:
     vm = None
     for obj in vm_view.view:
         if obj.name == VM_NAME:
+            print(f"Found VM: {obj.name}")
             vm = obj
             break
 
     vm_view.Destroy()
+
+    # Verifica o provider de performance da VM.
+    provider_summary = perf_manager.QueryPerfProviderSummary(entity=vm)
+
+    print(f"currentSupported: {provider_summary.currentSupported}")
+    print(f"summarySupported: {provider_summary.summarySupported}")
+    print(f"refreshRate: {provider_summary.refreshRate}")
+
 
     # Monta o mapa nome_da_metrica -> counter_id.
     counter_id_by_name = {}
@@ -102,16 +109,40 @@ def collect_vcenter_vm_metrics(start: str, end: str) -> pd.DataFrame:
         counter_name_by_id[counter.key] = metric_name
         counter_unit_by_id[counter.key] = counter.unitInfo.label
 
+    # Descobre quais métricas estão disponíveis para a VM naquela janela.
+    available_metrics = perf_manager.QueryAvailablePerfMetric(
+        entity=vm,
+        beginTime=start_time,
+        endTime=end_time,
+        intervalId=INTERVAL_ID,
+    )
+
+    available_counter_ids = set()
+
+    for available_metric in available_metrics:
+        # instance="" significa métrica agregada da VM.
+        # Para o seu caso, queremos apenas a métrica agregada, não instâncias de disco/rede/CPU.
+        if available_metric.instance == "":
+            available_counter_ids.add(available_metric.counterId)
+
+    print(f"Total de métricas agregadas disponíveis na janela: {len(available_counter_ids)}")
+
     # Monta a lista de métricas a consultar.
     metric_ids = []
 
     for metric_name in METRICS:
-        metric_ids.append(
-            vim.PerformanceManager.MetricId(
-                counterId=counter_id_by_name[metric_name],
-                instance="",
+       counter_id = counter_id_by_name[metric_name]
+       if counter_id in available_counter_ids:
+            print(f"Métrica disponível: {metric_name} / counterId={counter_id}")
+
+            metric_ids.append(
+                vim.PerformanceManager.MetricId(
+                    counterId=counter_id,
+                    instance="",
+                )
             )
-        )
+       else:
+            print(f"Métrica NÃO disponível na janela: {metric_name} / counterId={counter_id}")
 
     # Consulta as métricas no intervalo start/end.
     query_spec = vim.PerformanceManager.QuerySpec(
@@ -125,9 +156,14 @@ def collect_vcenter_vm_metrics(start: str, end: str) -> pd.DataFrame:
 
     perf_results = perf_manager.QueryPerf(querySpec=[query_spec])
 
+    print(f"Quantidade de objetos retornados por QueryPerf: {len(perf_results)}")
+
     rows = []
 
     for result in perf_results:
+        print(f"Amostras retornadas: {len(result.sampleInfo)}")
+        print(f"Séries retornadas: {len(result.value)}")
+        
         for series in result.value:
             metric_name = counter_name_by_id[series.id.counterId]
             unit = counter_unit_by_id[series.id.counterId]
@@ -157,12 +193,16 @@ def collect_vcenter_vm_metrics(start: str, end: str) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
 
-    df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True)
+    if len(df) > 0:
+        df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True)
 
-    df = df.sort_values(
-        by=["timestamp_utc", "metric"],
-        ignore_index=True,
-    )
+        df = df.sort_values(
+            by=["timestamp_utc", "metric"],
+            ignore_index=True,
+        )
+
+
+    print(f"Quantidade de linhas no DataFrame: {len(df)}")
 
     return df
 
@@ -172,25 +212,25 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--start",
-        required=True,
+        required=False,
         help="Início da janela no formato 2026-06-27T13:01:00.000Z",
     )
 
     parser.add_argument(
         "--end",
-        required=True,
+        required=False,
         help="Fim da janela no formato 2026-06-27T13:06:00.000Z",
     )
 
     parser.add_argument(
         "--roudtrip",
-        required=True,
+        required=False,
         help="Rodada de teste para identificar o arquivo de saída. Ex: 1, 2, 3, etc.",
     )
 
     parser.add_argument(
         "--gnbid",
-        required=True,
+        required=False,
         help="ID do gNB",
     )
 
@@ -199,8 +239,8 @@ if __name__ == "__main__":
     df_metrics = collect_vcenter_vm_metrics(
         #start=args.start,
         #end=args.end,
-        start="2026-06-27T13:01:00.000Z",
-        end="2026-06-27T14:01:00.000Z"
+        start="2026-07-04T18:13:00.000Z",
+        end="2026-07-04T19:00:00.000Z"
     )
 
     print(df_metrics)
