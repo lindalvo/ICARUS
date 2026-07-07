@@ -1,5 +1,6 @@
 import csv
 import os
+from pathlib import Path
 import time
 import pandas as pd
 import numpy as np
@@ -12,16 +13,17 @@ from pyomo.environ import (
 from pyomo.opt import SolverFactory, TerminationCondition
 from ICARUS.util.constants import FIBER_DELAY_US_PER_KM, OUT_DIR, Filename, MAX_FIBER_DISTANCE_KM, MAX_LOAD, MAX_CLUSTER_SIZE
 
-def cluster_ilp(df, df_dm):
+def cluster_ilp(df: pd.DataFrame, df_dm: pd.DataFrame, objective_mode: str):
     """
     Clusteriza RUs em DUs usando Programação Linear Inteira via Pyomo.
 
     Objetivos:
-    1) Minimizar o número de DUs;
-    2) Minimizar a soma das distâncias RU-DU.
+    Primário: Minimizar o número de DUs;
+    Secundário:   "total_distance" -> minimiza soma total das distâncias RU-DU.
+                  "max_link"       -> minimiza o maior enlace individual RU-DU.
 
     Restrições:
-    1) Cada RU deve ser atendida por exatamente uma DU viável;
+    1) Cada RU deve ser atendida por exatamente uma DU;
     2) Distância RU-DU <= MAX_FIBER_DISTANCE_KM;
     3) Soma das larguras de banda por DU <= MAX_LOAD;
     4) Cada cluster pode ter no máximo MAX_CLUSTER_SIZE elementos, incluindo a própria DU.
@@ -89,24 +91,8 @@ def cluster_ilp(df, df_dm):
     # x[i,j] = 1 se a RU i é atendida pela DU j
     m.x = Var(m.A, domain=Binary)        
 
-    # Pesos da Função Objetivo 
-    # uma DU a menos sempre deve valer mais do que qualquer economia possível de distância.
-    WEIGHT_DU = int(len(ids) * float(MAX_FIBER_DISTANCE_KM) + 1)
-    WEIGHT_DIST = 1
-    
-
-    # Função Objetivo: Minimiza (Custo Fixo * Num DUs) + (Custo Variável * Distância Total)
-    def obj_rule(mm):
-        return (
-            WEIGHT_DU * sum(mm.y[j] for j in mm.I)
-            + WEIGHT_DIST * sum(mm.dist[i, j] * mm.x[i, j] for (i, j) in mm.A)
-        )
-
-    m.OBJ = Objective(rule=obj_rule, sense=minimize)
-    
-
     # Restrições ---
- # 1) Cada RU i deve ser atendida por exatamente uma DU viável.
+    # 1) Cada RU i deve ser atendida por exatamente uma DU viável.
     def assign_rule(mm, i):
         return sum(mm.x[i, j] for j in neighbors_by_i[i]) == 1
 
@@ -144,40 +130,101 @@ def cluster_ilp(df, df_dm):
         )
 
     m.MaxClusterSize = Constraint(m.I, rule=max_cluster_size_rule)
-    
-    TIME_LIMIT_SEC = int(n_valid_pairs * 16)
 
-    # --- 4. Resolução ---
-    print(f"Resolvendo ILP (tempo limite {TIME_LIMIT_SEC} segundos)...")
+    # Configurações do SOLVER
+    TIME_LIMIT_SEC = int(n_valid_pairs * 16)
     SOLVER = 'cbc'  # 'cbc', 'glpk', 'gurobi', 'cplex'
     THREADS = os.cpu_count() or 4
-    opt = SolverFactory(SOLVER)
 
-    match SOLVER:
-        case "cbc":
-            opt.options.clear()
-            opt.options["seconds"] = int(TIME_LIMIT_SEC)
-            opt.options["timeMode"] = "elapsed"
-            opt.options["threads"] = int(THREADS)
-        case "glpk":
-            opt.options.clear()
-            opt.options["tmlim"] = int(TIME_LIMIT_SEC)
-        case "gurobi" | "gurobi_direct" | "gurobi_persistent":
-            opt.options.clear()
-            #opt.options["TimeLimit"] = float(TIME_LIMIT_SEC)
-            opt.options["Threads"] = int(THREADS)
-        case "cplex" | "cplex_direct" | "cplex_persistent":
-            opt.options.clear()
-            opt.options["timelimit"] = float(TIME_LIMIT_SEC)
-            opt.options["threads"] = int(THREADS)
+    def configure_solver():
+        opt = SolverFactory(SOLVER)
+        opt.options.clear()
+        match SOLVER:
+            case "cbc":
+                opt.options.clear()
+                opt.options["seconds"] = int(TIME_LIMIT_SEC)
+                opt.options["timeMode"] = "elapsed"
+                opt.options["threads"] = int(THREADS)
+            case "glpk":
+                opt.options.clear()
+                opt.options["tmlim"] = int(TIME_LIMIT_SEC)
+            case "gurobi" | "gurobi_direct" | "gurobi_persistent":
+                opt.options.clear()
+                #opt.options["TimeLimit"] = float(TIME_LIMIT_SEC)
+                opt.options["Threads"] = int(THREADS)
+            case "cplex" | "cplex_direct" | "cplex_persistent":
+                opt.options.clear()
+                opt.options["timelimit"] = float(TIME_LIMIT_SEC)
+                opt.options["threads"] = int(THREADS)
+        return opt
+    
+    # --- Resolução Etapa 1 - minimização do número de DUs ---
+    #adicionando o objetico ao modelo
+    m.Stage1OBJ = Objective(
+        expr=sum(m.y[j] for j in m.I),
+        sense=minimize,
+    )
 
+    print(f"Minimizando o número de DUs com solver {SOLVER} (threads={THREADS})...")
+    print(f"Tempo limite {TIME_LIMIT_SEC} segundos)...")
+    
+    opt = configure_solver()
     inicio = time.perf_counter()
     results = opt.solve(m, tee=True)
     fim = time.perf_counter()
-    print(f"Tempo de resolução: {fim - inicio:.2f} segundos.")
+    print(f"Tempo de resolução primeira etapa: {fim - inicio:.2f} segundos.")
     term = results.solver.termination_condition
     print(f"TerminationCondition: {term}.")
+    if term != TerminationCondition.optimal:
+        raise RuntimeError(f"Minimização do número de DUs não provou otimalidade. TerminationCondition: {term}. Para garantir número mínimo de DUs, a primeira etapa precisa ser ótima.")
+    best_du_count = int(round(sum(value(m.y[j]) for j in m.I)))
+    print(f"Número mínimo de DUs encontrado: {best_du_count}")
+
+    # Resolução Etapa 2 otimizar objetivo secundário passado como parâmetro
+    #adicionado a restrição de número mínimo de DUs ao modelo
+    m.FixDUCount = Constraint(
+        expr=sum(m.y[j] for j in m.I) == best_du_count
+    )
+    #desativar o objetivo primário
+    m.Stage1OBJ.deactivate()
+
+    msg = ""
+    #adicionar o objetivo secundário
+    if objective_mode == "total_distance":
+        msg = "Minimizando a soma total das distâncias RU-DU."
+        m.Stage2OBJ = Objective(
+            expr=sum(
+                m.dist[i, j] * m.x[i, j]
+                for (i, j) in m.A
+            ),
+            sense=minimize
+        )
+
+    elif objective_mode == "max_link":
+        msg = "Minimizando o maior enlace individual RU-DU."
+        m.MaxLinkDistance = Var(domain=NonNegativeReals)
+
+        def max_link_rule(mm, i, j):
+            return mm.MaxLinkDistance >= mm.dist[i, j] * mm.x[i, j]
+
+        m.MaxLinkConstraint = Constraint(m.A, rule=max_link_rule)
+
+        m.Stage2OBJ = Objective(
+            expr=m.MaxLinkDistance,
+            sense=minimize,
+        )
     
+    print(f"{msg} com solver {SOLVER} (threads={THREADS})...")
+    print(f"Tempo limite {TIME_LIMIT_SEC} segundos)...")
+
+    opt = configure_solver()
+    inicio = time.perf_counter()
+    results = opt.solve(m, tee=True)
+    fim = time.perf_counter()
+    print(f"Tempo de resolução segunda etapa: {fim - inicio:.2f} segundos.")
+    term = results.solver.termination_condition
+    print(f"TerminationCondition: {term}.")
+
     # Aceita ótimo, ou interrupção por limite de tempo com incumbente
     ok_terms = {
         TerminationCondition.optimal,
@@ -205,7 +252,7 @@ def cluster_ilp(df, df_dm):
     return df
 
 
-def stats(df, df_dm):
+def stats(df, df_dm, output_filename: Path):
     #calcula, imprime e salva estatísticas básicas
     rows: List[Dict[str, Any]] = []
 
@@ -264,9 +311,8 @@ def stats(df, df_dm):
         "DP_LinkDistance": dp_dist_ru_du,
     })
 
-    stats_output_path = OUT_DIR / f"stats_{Filename}.csv"
     stats_df = pd.DataFrame(rows)
-    stats_df.to_csv(stats_output_path, index=False)
+    stats_df.to_csv(output_filename, index=False)
     return 0
 
 def check_rules(df, df_dm):
@@ -374,11 +420,11 @@ def check_rules(df, df_dm):
 def generate_map(
     df: pd.DataFrame,
     df_dm: pd.DataFrame,
+    output_filename: Path
 ):
     """
     Gera um mapa HTML da clusterização ILP RU -> O-DU.
     """
-    output_html = OUT_DIR / f"map_{Filename}.html"
     tiles: str = "OpenStreetMap"
     df = df.copy()
     df["id"] = df["id"].astype(int)
@@ -543,14 +589,15 @@ def generate_map(
     # Ajusta o zoom para cobrir todas as estações
     bounds = df[["Lat", "Lon"]].values.tolist()
     mapa.fit_bounds(bounds)
-    print(f"Salvando mapa interativo em {output_html}...")
-    mapa.save(output_html)
+    print(f"Salvando mapa interativo em {output_filename}...")
+    mapa.save(output_filename)
 
     return True
 
 def generate_csv_to_pipeline(
     df: pd.DataFrame,
     df_dm: pd.DataFrame,
+    output_filename: Path
 ) -> None:
     """
     Gera um TXT com uma linha por cluster DU/RU.
@@ -570,7 +617,6 @@ def generate_csv_to_pipeline(
     - df_dm: matriz de distâncias, indexada por id nas linhas e colunas.
     """
 
-    output_csv = OUT_DIR / f"pipeline_{Filename}.txt"
     delay_decimals = 0  # número de casas decimais para os delays em microssegundos
 
     # Garante ordem estável dos clusters conforme aparecem no df
@@ -610,14 +656,13 @@ def generate_csv_to_pipeline(
             ])
 
         rows.append(row)
-    print(f"Gerando arquivo de pipeline em {output_csv}...")
-    with output_csv.open("w", newline="", encoding="utf-8") as f:
+    print(f"Gerando arquivo de pipeline em {output_filename}...")
+    with output_filename.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerows(rows)
 
 if __name__ == "__main__":
     #abrindo o arquivo de dados de entrada (RUs + DUs) para clusterização
-    
     csv_path = OUT_DIR / f"grp_{Filename}.csv"
     print(f"Carregando o arquivo {csv_path}")
     df = pd.read_csv(csv_path)
@@ -633,23 +678,45 @@ if __name__ == "__main__":
     df_dm.index = df_dm.index.astype(int)
     df_dm.columns = df_dm.columns.astype(int)
 
-    output_filename = OUT_DIR / f"ilp_{Filename}.csv"
-    #df_cluster = cluster_ilp(df, df_dm)
-    #print(f"Gravando o resultado da clusterização em {output_filename}")
-    #df_cluster.to_csv(output_filename, index=False)
+    df_cluster = cluster_ilp(df, df_dm, objective_mode="total_distance")
+    output_filename = OUT_DIR / f"ilp_{Filename}_total_distance.csv"
+    print(f"Gravando o resultado da clusterização em {output_filename}")
+    df_cluster.to_csv(output_filename, index=False)
 
     #ou. se já tiver sido gerado em execução anterior, pode ser carregado diretamente:
-    print(f"Carregando clusterização de {output_filename}")
-    df_cluster = pd.read_csv(output_filename)
-    
+    #print(f"Carregando clusterização de {output_filename}")
+    #df_cluster = pd.read_csv(output_filename)
+
     #gravando as estatísticas em um arquivo CSV
-    #stats(df_cluster, df_dm)
+    stats(df_cluster, df_dm, output_filename=OUT_DIR / f"stats_{Filename}_total_distance.csv")
 
     #checando regras do cluster foram respeitadas
-    #check_rules(df_cluster, df_dm)
+    check_rules(df_cluster, df_dm)
     
     #Gerando Mapa
-    #generate_map(df_cluster, df_dm)
+    generate_map(df_cluster, df_dm, output_filename=OUT_DIR / f"map_{Filename}_total_distance.html")
 
     #Gerando Arquivo Texto para Pipeline
-    generate_csv_to_pipeline(df_cluster, df_dm)
+    generate_csv_to_pipeline(df_cluster, df_dm, output_filename=OUT_DIR / f"pipeline_{Filename}_total_distance.txt")
+
+    df_cluster = cluster_ilp(df, df_dm, objective_mode="max_link")
+    output_filename = OUT_DIR / f"ilp_{Filename}_max_link.csv"
+    print(f"Gravando o resultado da clusterização em {output_filename}")
+    df_cluster.to_csv(output_filename, index=False)
+
+    #ou. se já tiver sido gerado em execução anterior, pode ser carregado diretamente:
+    #print(f"Carregando clusterização de {output_filename}")
+    #df_cluster = pd.read_csv(output_filename)
+    
+    #gravando as estatísticas em um arquivo CSV
+    stats(df_cluster, df_dm, output_filename=OUT_DIR / f"stats_{Filename}_max_link.csv")
+
+    #checando regras do cluster foram respeitadas
+    check_rules(df_cluster, df_dm)
+    
+    #Gerando Mapa
+    generate_map(df_cluster, df_dm, output_filename=OUT_DIR / f"map_{Filename}_max_link.html")
+
+    #Gerando Arquivo Texto para Pipeline
+    generate_csv_to_pipeline(df_cluster, df_dm, output_filename=OUT_DIR / f"pipeline_{Filename}_max_link.txt")
+
