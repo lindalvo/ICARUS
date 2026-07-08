@@ -11,7 +11,13 @@ from pyomo.environ import (
     Objective, Constraint, minimize, value
 )
 from pyomo.opt import SolverFactory, TerminationCondition
-from ICARUS.util.constants import FIBER_DELAY_US_PER_KM, OUT_DIR, Filename, MAX_FIBER_DISTANCE_KM, MAX_LOAD, MAX_CLUSTER_SIZE
+from ICARUS.util.constants import FIBER_DELAY_US_PER_KM, MAX_FIBER_DISTANCE_KM, MAX_LOAD
+from dotenv import find_dotenv, load_dotenv
+
+load_dotenv(find_dotenv())
+Filename = os.environ["Filename"]
+OUT_DIR = Path(os.environ["OUT_DIR"]).resolve()
+MAX_CLUSTER_SIZE = int(os.environ["MAX_RUS"])
 
 def cluster_ilp(df: pd.DataFrame, df_dm: pd.DataFrame, objective_mode: str):
     """
