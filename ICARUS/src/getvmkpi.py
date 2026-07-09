@@ -229,10 +229,29 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--gnbid",
+        "--clusterid",
         required=False,
-        help="ID do gNB",
+        help="ID do cluster",
     )
+
+    parser.add_argument(
+        "--roundtrip",
+        required=False,
+        help="Rodada de teste para identificar o arquivo de saída. Ex: 1, 2, 3, etc."
+    )
+
+    parser.add_argument(
+        "--cenario",
+        required=False,
+        help="Cenário de teste para identificar o arquivo de saída. Ex: 1, 2, 3, etc."
+    )
+
+    parser.add_argument(
+        "--identificador",
+        required=False,
+        help="Identificador do Município Operadora"
+    )
+
 
     args = parser.parse_args()
 

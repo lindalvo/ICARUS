@@ -12,7 +12,6 @@ def _get_connection():
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA busy_timeout = 30000;")
-    conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
 
@@ -20,27 +19,28 @@ def init_db():
     with _get_connection() as conn:
         conn.execute("""
         CREATE TABLE IF NOT EXISTS stats (
-            cluster_id TEXT NOT NULL,
+            identificador TEXT NOT NULL,
             roundtrip INTEGER NOT NULL,
-
+            cluster_id TEXT NOT NULL,
+            cenario TEXT NOT NULL,
             timestamp_utc TEXT NOT NULL,
-            interval_sec INTEGER NOT NULL,
-
             metric TEXT NOT NULL,
             value REAL NOT NULL,
             unit TEXT,
-            PRIMARY KEY (roundtrip, cluster_id)
+            PRIMARY KEY (identificador, roundtrip, cluster_id, cenario)
         )
         """)
 
 
-def upsert_scenario(cod_municipio, operadora, **fields):
+def upsert_scenario(identificador, roundtrip, cluster_id, cenario, **fields):
     if not fields:
         return
 
     base = {
-        "cod_municipio": cod_municipio,
-        "operadora": operadora,
+        "identificador": identificador,
+        "roundtrip": roundtrip,
+        "cluster_id": cluster_id,
+        "cenario": cenario,
         **fields
     }
 
@@ -54,7 +54,7 @@ def upsert_scenario(cod_municipio, operadora, **fields):
     sql = f"""
     INSERT INTO scenarios ({column_names})
     VALUES ({placeholders})
-    ON CONFLICT(pk1, pk2)
+    ON CONFLICT(identificador, roundtrip, cluster_id, cenario)
     DO UPDATE SET {update_clause}
     """
 
