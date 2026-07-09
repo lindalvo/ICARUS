@@ -1,20 +1,22 @@
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${SCRIPT_DIR}/../.env"
+ENV_FILE="${SCRIPT_DIR}/../../.env"
 set -a             
 source "$ENV_FILE"
 set +a
 
+FULL_PATH=$(realpath ../.$OUT_DIR)
+
 ROUNDTRIPS=30
 
-echo "Iniciando processamento dos arquivos em: $OUT_DIR"
+echo "Iniciando processamento dos arquivos em: $FULL_PATH"
 echo "--------------------------------------------------"
 
 # ==========================================
 # LOOP PRINCIPAL
 # ==========================================
 # Iterar sobre todos os arquivos .txt da pasta que começam com 'pipeline_'
-for arquivo_caminho in "$OUT_DIR"/pipeline_*.txt; do
+for arquivo_caminho in "$FULL_PATH"/pipeline_*.txt; do
     
     # Se não houver nenhum arquivo que case com o padrão inicial, o bash pode retornar o próprio padrão literal.
     # Esta linha garante que o arquivo realmente existe antes de prosseguir.
@@ -48,8 +50,8 @@ for arquivo_caminho in "$OUT_DIR"/pipeline_*.txt; do
         for (( i=1; i<=ROUNDTRIPS; i++ )); do
             echo "-> Executando rodada $i de $ROUNDTRIPS..."
             
-            # Chama o seu script anterior passando os 4 parâmetros exigidos por ele
-            ./run_topology.sh "$arquivo_caminho" "$i" "$TIPO_CALCULO" "$IDENTIFICADOR"
+            echo "+ ./run_topology.sh $arquivo_caminho $i $TIPO_CALCULO $IDENTIFICADOR"
+            #./run_topology.sh "$arquivo_caminho" "$i" "$TIPO_CALCULO" "$IDENTIFICADOR"
             
             # Opcional: Verifica se o script filho rodou com sucesso
             if [ $? -ne 0 ]; then

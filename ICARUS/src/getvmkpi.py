@@ -9,7 +9,7 @@ from dotenv import find_dotenv, load_dotenv
 import pandas as pd
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
-
+from ICARUS.util.sqlite import init_db, upsert_scenario
 load_dotenv(find_dotenv())
 
 VCENTER_IP = os.environ["VCENTER_IP"]
@@ -235,12 +235,6 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--roundtrip",
-        required=False,
-        help="Rodada de teste para identificar o arquivo de saída. Ex: 1, 2, 3, etc."
-    )
-
-    parser.add_argument(
         "--cenario",
         required=False,
         help="Cenário de teste para identificar o arquivo de saída. Ex: 1, 2, 3, etc."
@@ -262,7 +256,15 @@ if __name__ == "__main__":
         end="2026-07-08T16:28:00.000Z"
     )
 
-    print(df_metrics)
+    init_db()
+    identificador, roundtrip, cluster_id, cenario = args.identificador, args.roundtrip, args.clusterid, args.cenario
+    print(f"Gravando estatísticas do identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
+    upsert_scenario(identificador, roundtrip, cluster_id, cenario,
+            timestamp_utc=df_metrics["timestamp_utc"].iloc[-1].isoformat(),
+            metric=df_metrics["metric"].iloc[-1],
+            value=df_metrics["value"].iloc[-1],
+            unit=df_metrics["unit"].iloc[-1]
+        )
 
     df_metrics.to_csv(
         f"vcenter_vm_metrics_raw_{args.roudtrip}_{args.gnbid}.csv",
