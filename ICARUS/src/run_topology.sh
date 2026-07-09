@@ -54,8 +54,8 @@ fi
 CENARIO="$3"
 
 # Verifica se o valor é exatamente uma das duas opções permitidas
-if [ "$TIPO_CALCULO" != "max_link" ] && [ "$TIPO_CALCULO" != "total_distance" ]; then
-    echo "Erro: O parâmetro '$TIPO_CALCULO' é inválido. Escolha entre 'max_link' ou 'total_distance'."
+if [ "$CENARIO" != "max_link" ] && [ "$CENARIO" != "total_distance" ]; then
+    echo "Erro: O parâmetro '$CENARIO' é inválido. Escolha entre 'max_link' ou 'total_distance'."
     exit 1
 fi
 
@@ -68,7 +68,7 @@ fi
 IDENTIFICADOR="$4"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${SCRIPT_DIR}/../.env"
+ENV_FILE="${SCRIPT_DIR}/../../.env"
 set -a             
 source "$ENV_FILE"
 set +a
@@ -150,7 +150,7 @@ while IFS= read -r linha || [ -n "$linha" ]; do
         exit 1
     }
 
-    CONFIG_DIR="${OUT_DIR}/gnb_${DU_ID}"
+    CONFIG_DIR="../.${OUT_DIR}/gnb_${DU_ID}"
     GNB_YAML="${CONFIG_DIR}/gnb_${DU_ID}.yml"
 	GNB_OUTPUT="${CONFIG_DIR}/gnb_${DU_ID}.out"
 
@@ -483,7 +483,7 @@ while IFS= read -r linha || [ -n "$linha" ]; do
         RU5_CPUSET="44-47"
     fi
 
-    GNB_MATRIZ="${OUT_DIR}/GNB_${CONT}RU_matriz.yml"
+    GNB_MATRIZ="${SCRIPT_DIR}/../assets/GNB_${CONT}RU_matriz.yml"
 
     echo "============================================================"
     echo "Gerando YAML da GNB"
@@ -648,8 +648,12 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     echo "============================================================"
     echo "Coletando Métricas da VM entre $DATA_INICIO e $DATA_FIM "
     echo "============================================================"
-    python getvmkpi.py --start $DATA_INICIO --end $DATA_FIM --clusterid $DU_ID --roundtrip $ROUNDTRIP --cenario $CENARIO --identificador $IDENTIFICADOR
-
+    echo ""
+    echo ""
+    echo "+ ./getvmkpi.py --start ${DATA_INICIO} --end ${DATA_FIM} --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}"
+    ./getvmkpi.py --start $DATA_INICIO --end $DATA_FIM --clusterid $DU_ID --roundtrip $ROUNDTRIP --cenario $CENARIO --identificador $IDENTIFICADOR
+    echo ""
+    echo ""
     echo "============================================================"
     echo "         Encerrando a GNB $DU_ID e $CONT RUs Emuladas       "
     echo "============================================================"

@@ -140,28 +140,25 @@ def cluster_ilp(df: pd.DataFrame, df_dm: pd.DataFrame, objective_mode: str):
     # Configurações do SOLVER
     TIME_LIMIT_SEC = int(n_valid_pairs * 16)
     SOLVER = 'cbc'  # 'cbc', 'glpk', 'gurobi', 'cplex'
-    THREADS = os.cpu_count() or 4
+    MAX_SOLVER_THREADS = 16
+    THREADS = min(os.cpu_count() or 4, MAX_SOLVER_THREADS)
 
     def configure_solver():
         opt = SolverFactory(SOLVER)
         opt.options.clear()
+        opt.options["ratio"] = 0.0001
+        opt.options["threads"] = int(THREADS)
         match SOLVER:
             case "cbc":
-                opt.options.clear()
                 opt.options["seconds"] = int(TIME_LIMIT_SEC)
                 opt.options["timeMode"] = "elapsed"
-                opt.options["threads"] = int(THREADS)
             case "glpk":
-                opt.options.clear()
                 opt.options["tmlim"] = int(TIME_LIMIT_SEC)
             case "gurobi" | "gurobi_direct" | "gurobi_persistent":
-                opt.options.clear()
-                #opt.options["TimeLimit"] = float(TIME_LIMIT_SEC)
-                opt.options["Threads"] = int(THREADS)
+                opt.options["TimeLimit"] = float(TIME_LIMIT_SEC)
             case "cplex" | "cplex_direct" | "cplex_persistent":
-                opt.options.clear()
                 opt.options["timelimit"] = float(TIME_LIMIT_SEC)
-                opt.options["threads"] = int(THREADS)
+                
         return opt
     
     # --- Resolução Etapa 1 - minimização do número de DUs ---
