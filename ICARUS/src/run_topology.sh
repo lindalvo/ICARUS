@@ -150,7 +150,7 @@ while IFS= read -r linha || [ -n "$linha" ]; do
         exit 1
     }
 
-    CONFIG_DIR="../.${OUT_DIR}/gnb_${DU_ID}"
+    CONFIG_DIR="../.${OUT_DIR}/${IDENTIFICADOR}/${CENARIO}/${ROUNDTRIP}/gnb_${DU_ID}"
     GNB_YAML="${CONFIG_DIR}/gnb_${DU_ID}.yml"
 	GNB_OUTPUT="${CONFIG_DIR}/gnb_${DU_ID}.out"
 
@@ -650,7 +650,7 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     echo "============================================================"
     echo ""
     echo ""
-    echo "+ poetry run python ./getvmkpi.py --start ${DATA_INICIO} --end ${DATA_FIM} --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}"
+    echo "+ ./getvmkpi.py --start ${DATA_INICIO} --end ${DATA_FIM} --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}"
     poetry run python ./getvmkpi.py --start $DATA_INICIO --end $DATA_FIM --clusterid $DU_ID --roundtrip $ROUNDTRIP --cenario $CENARIO --identificador $IDENTIFICADOR
     echo ""
     echo ""
