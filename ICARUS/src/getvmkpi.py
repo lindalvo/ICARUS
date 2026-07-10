@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import argparse
 import atexit
 import ssl
@@ -16,7 +14,6 @@ VCENTER_IP = os.environ["VCENTER_IP"]
 VCENTER_USER = os.environ["VCENTER_USER"]
 VCENTER_PASSWORD = os.environ["VCENTER_PASSWORD"]
 VM_NAME = os.environ["VCENTER_VM"]
-
 # Intervalo realtime típico do vSphere.
 # Use 20 se suas amostras no govc aparecem de 20 em 20 segundos.
 INTERVAL_ID = 20
@@ -223,7 +220,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--roudtrip",
+        "--roundtrip",
         required=False,
         help="Rodada de teste para identificar o arquivo de saída. Ex: 1, 2, 3, etc.",
     )
@@ -237,7 +234,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--cenario",
         required=False,
-        help="Cenário de teste para identificar o arquivo de saída. Ex: 1, 2, 3, etc."
+        help="Cenário de teste para identificar o arquivo de saída. max link ou total_distance"
     )
 
     parser.add_argument(
@@ -249,12 +246,15 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    
     df_metrics = collect_vcenter_vm_metrics(
-        #start=args.start,
-        #end=args.end,
-        start="2026-07-08T15:28:00.000Z",
-        end="2026-07-08T16:28:00.000Z"
+        start=args.start,
+        end=args.end
     )
+
+    if len(df_metrics) == 0:
+        print("Nenhuma métrica coletada na janela solicitada.")
+        exit(1)
 
     init_db()
     identificador, roundtrip, cluster_id, cenario = args.identificador, args.roundtrip, args.clusterid, args.cenario
@@ -266,8 +266,3 @@ if __name__ == "__main__":
             unit=df_metrics["unit"].iloc[-1]
         )
 
-    df_metrics.to_csv(
-        f"vcenter_vm_metrics_raw_{args.roudtrip}_{args.gnbid}.csv",
-        index=False,
-        encoding="utf-8",
-    )

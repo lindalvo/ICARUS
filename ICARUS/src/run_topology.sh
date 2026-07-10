@@ -650,8 +650,8 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     echo "============================================================"
     echo ""
     echo ""
-    echo "+ ./getvmkpi.py --start ${DATA_INICIO} --end ${DATA_FIM} --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}"
-    ./getvmkpi.py --start $DATA_INICIO --end $DATA_FIM --clusterid $DU_ID --roundtrip $ROUNDTRIP --cenario $CENARIO --identificador $IDENTIFICADOR
+    echo "+ poetry run python ./getvmkpi.py --start ${DATA_INICIO} --end ${DATA_FIM} --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}"
+    poetry run python ./getvmkpi.py --start $DATA_INICIO --end $DATA_FIM --clusterid $DU_ID --roundtrip $ROUNDTRIP --cenario $CENARIO --identificador $IDENTIFICADOR
     echo ""
     echo ""
     echo "============================================================"

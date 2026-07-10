@@ -6,14 +6,16 @@ from dotenv import find_dotenv, load_dotenv
 
 load_dotenv(find_dotenv())
 
-DB_PATH = Path(os.environ["OUT_DIR"]).resolve() / "icarus.db"
+BASE_DIR = os.path.abspath('../OUT')
+print(f"BASE_DIR={BASE_DIR}")
+DB_PATH = os.path.join(BASE_DIR, "icarus.db")
+print(f"DB_PATH={DB_PATH}")
 
 def _get_connection():
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA busy_timeout = 30000;")
     return conn
-
 
 def init_db():
     with _get_connection() as conn:
@@ -52,7 +54,7 @@ def upsert_scenario(identificador, roundtrip, cluster_id, cenario, **fields):
     update_clause = ", ".join(f"{c} = excluded.{c}" for c in update_columns)
 
     sql = f"""
-    INSERT INTO scenarios ({column_names})
+    INSERT INTO stats ({column_names})
     VALUES ({placeholders})
     ON CONFLICT(identificador, roundtrip, cluster_id, cenario)
     DO UPDATE SET {update_clause}
