@@ -612,7 +612,7 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     numactl --cpunodebind="$GNB_NUMA" --membind="$GNB_NUMA" taskset -c "$GNB_CPUSET" gnb -c "$GNB_YAML" > "$GNB_OUTPUT" 2>&1 &
     pids+=($!)
 	
-    echo "Executando as RU_emulated:"
+    echo "Executando as ${CONT} RUs Emuladas:"
 
     for ((j=1; j<=CONT; j++)); do
         NS="ru${j}"
@@ -630,28 +630,30 @@ while IFS= read -r linha || [ -n "$linha" ]; do
         elif [ "$j" -eq 5 ]; then
             RU_CPUSET="$RU5_CPUSET"
         fi
-
+        echo "------------------------------------------------------------"
+        echo "RU emulada $j"
         echo "+ ip netns exec ${NS} numactl --cpunodebind=1 --membind=1 taskset -c ${RU_CPUSET} ru_emulator -c ${RU_YAML} > ${RU_OUTPUT} 2>&1 &"
 		ip netns exec "$NS" numactl --cpunodebind=1 --membind=1 taskset -c "$RU_CPUSET" ru_emulator -c "$RU_YAML" > "$RU_OUTPUT" 2>&1 &
 		pids+=($!)
     done
 
     echo "============================================================"
-    echo "       Executando a topologia por 5 Minutos                 "
+    echo "       Executando a topologia por 3 Minutos                 "
     echo "============================================================"
 	DATA_INICIO=$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')
+    echo ""
     echo "Inicio: $DATA_INICIO" 
-    sleep 5m
-
+    echo "+ poetry run python ./get_gnbemu_kpi.py --seconds 180 --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}" 
+    poetry run python ./get_gnbemu_kpi.py --seconds 180 --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}
 	DATA_FIM=$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')
     echo "Fim: $DATA_FIM" 
+    echo ""
     echo "============================================================"
-    echo "Coletando Métricas da VM entre $DATA_INICIO e $DATA_FIM "
+    echo "Coletando Métricas de consumo de energia da VM entre $DATA_INICIO e $DATA_FIM "
     echo "============================================================"
     echo ""
-    echo ""
-    echo "+ ./getvmkpi.py --start ${DATA_INICIO} --end ${DATA_FIM} --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}"
-    poetry run python ./getvmkpi.py --start $DATA_INICIO --end $DATA_FIM --clusterid $DU_ID --roundtrip $ROUNDTRIP --cenario $CENARIO --identificador $IDENTIFICADOR
+    echo "+ poetry run python ./get_power_kpi.py --start ${DATA_INICIO} --end ${DATA_FIM} --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}" 
+    poetry run python ./get_power_kpi.py --start $DATA_INICIO --end $DATA_FIM --clusterid $DU_ID --roundtrip $ROUNDTRIP --cenario $CENARIO --identificador $IDENTIFICADOR
     echo ""
     echo ""
     echo "============================================================"
@@ -688,7 +690,7 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     echo ""
     echo "Topologia da GNB/DU $DU_ID removida."
     echo ""
-
+    sleep 5s
 done < "$ARQUIVO"
 
 echo "Processamento finalizado."

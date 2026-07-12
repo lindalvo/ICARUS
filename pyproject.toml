@@ -19,7 +19,8 @@ dependencies = [
     "chardet",
     "gurobipy (>=13.0.1,<14.0.0)",
     "pyVmomi",
-    "python-dotenv"
+    "python-dotenv",
+    "websocket-client"
 ]
 
 [tool.poetry]

@@ -24,12 +24,7 @@ FIX_ESXI7_VM_POWER_SCALE = True
 
 METRICS = [
     "power.power.average",
-    "power.energy.summation",
-    "cpu.usagemhz.average",
-    "cpu.ready.summation",
-    "cpu.costop.summation",
-    "mem.active.average",
-    "mem.consumed.average",
+    "power.energy.summation"
 ]
 
 
@@ -208,38 +203,38 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--start",
-        required=False,
-        help="Início da janela no formato 2026-06-27T13:01:00.000Z",
+        "--seconds",
+        required=True,
+        help="Duração da janela em segundos",
     )
 
     parser.add_argument(
         "--end",
-        required=False,
+        required=True,
         help="Fim da janela no formato 2026-06-27T13:06:00.000Z",
     )
 
     parser.add_argument(
         "--roundtrip",
-        required=False,
+        required=True,
         help="Rodada de teste para identificar o arquivo de saída. Ex: 1, 2, 3, etc.",
     )
 
     parser.add_argument(
         "--clusterid",
-        required=False,
+        required=True,
         help="ID do cluster",
     )
 
     parser.add_argument(
         "--cenario",
-        required=False,
+        required=True,
         help="Cenário de teste para identificar o arquivo de saída. max link ou total_distance"
     )
 
     parser.add_argument(
         "--identificador",
-        required=False,
+        required=True,
         help="Identificador do Município Operadora"
     )
 

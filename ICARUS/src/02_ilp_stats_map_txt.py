@@ -19,14 +19,11 @@ Filename = os.environ["Filename"]
 OUT_DIR = Path(os.environ["OUT_DIR"]).resolve()
 MAX_CLUSTER_SIZE = int(os.environ["MAX_RUS"])
 
-def cluster_ilp(df: pd.DataFrame, df_dm: pd.DataFrame, objective_mode: str):
+def cluster_ilp_primario(df: pd.DataFrame, df_dm: pd.DataFrame):
     """
     Clusteriza RUs em DUs usando Programação Linear Inteira via Pyomo.
 
-    Objetivos:
-    Primário: Minimizar o número de DUs;
-    Secundário:   "total_distance" -> minimiza soma total das distâncias RU-DU.
-                  "max_link"       -> minimiza o maior enlace individual RU-DU.
+    Objetivo Primário: Minimizar o número de DUs;
 
     Restrições:
     1) Cada RU deve ser atendida por exatamente uma DU;
@@ -71,7 +68,7 @@ def cluster_ilp(df: pd.DataFrame, df_dm: pd.DataFrame, objective_mode: str):
     print(f"Número de pares válidos (i,j) para conexão: {n_valid_pairs}")
 
     # --- 2. Criação do Modelo  ---
-    m = ConcreteModel("RAN_Clustering_ILP")
+    m = ConcreteModel("ICARUS_Primario")
 
     m.I = Set(initialize=ids, ordered=True)
     m.A = Set(dimen=2, initialize=valid_pairs, ordered=False)
@@ -143,25 +140,23 @@ def cluster_ilp(df: pd.DataFrame, df_dm: pd.DataFrame, objective_mode: str):
     MAX_SOLVER_THREADS = 16
     THREADS = min(os.cpu_count() or 4, MAX_SOLVER_THREADS)
 
-    def configure_solver():
-        opt = SolverFactory(SOLVER)
-        opt.options.clear()
-        opt.options["ratio"] = 0.0001
-        opt.options["threads"] = int(THREADS)
-        match SOLVER:
-            case "cbc":
-                opt.options["seconds"] = int(TIME_LIMIT_SEC)
-                opt.options["timeMode"] = "elapsed"
-            case "glpk":
-                opt.options["tmlim"] = int(TIME_LIMIT_SEC)
-            case "gurobi" | "gurobi_direct" | "gurobi_persistent":
-                opt.options["TimeLimit"] = float(TIME_LIMIT_SEC)
-            case "cplex" | "cplex_direct" | "cplex_persistent":
-                opt.options["timelimit"] = float(TIME_LIMIT_SEC)
-                
-        return opt
+    opt = SolverFactory(SOLVER)
+    opt.options.clear()
+    opt.options["ratio"] = 0.0001
+    opt.options["threads"] = int(THREADS)
+    match SOLVER:
+        case "cbc":
+            opt.options["seconds"] = int(TIME_LIMIT_SEC)
+            opt.options["timeMode"] = "elapsed"
+        case "glpk":
+            opt.options["tmlim"] = int(TIME_LIMIT_SEC)
+        case "gurobi" | "gurobi_direct" | "gurobi_persistent":
+            opt.options["TimeLimit"] = float(TIME_LIMIT_SEC)
+        case "cplex" | "cplex_direct" | "cplex_persistent":
+            opt.options["timelimit"] = float(TIME_LIMIT_SEC)
+            
     
-    # --- Resolução Etapa 1 - minimização do número de DUs ---
+    # --- Objetivo Primário - minimização do número de DUs ---
     #adicionando o objetico ao modelo
     m.Stage1OBJ = Objective(
         expr=sum(m.y[j] for j in m.I),
@@ -171,7 +166,6 @@ def cluster_ilp(df: pd.DataFrame, df_dm: pd.DataFrame, objective_mode: str):
     print(f"Minimizando o número de DUs com solver {SOLVER} (threads={THREADS})...")
     print(f"Tempo limite {TIME_LIMIT_SEC} segundos)...")
     
-    opt = configure_solver()
     inicio = time.perf_counter()
     results = opt.solve(m, tee=True)
     fim = time.perf_counter()
@@ -182,16 +176,130 @@ def cluster_ilp(df: pd.DataFrame, df_dm: pd.DataFrame, objective_mode: str):
         raise RuntimeError(f"Minimização do número de DUs não provou otimalidade. TerminationCondition: {term}. Para garantir número mínimo de DUs, a primeira etapa precisa ser ótima.")
     best_du_count = int(round(sum(value(m.y[j]) for j in m.I)))
     print(f"Número mínimo de DUs encontrado: {best_du_count}")
+    return best_du_count
 
-    # Resolução Etapa 2 otimizar objetivo secundário passado como parâmetro
-    #adicionado a restrição de número mínimo de DUs ao modelo
+def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count: int, objective_mode: str):
+    """
+    Clusteriza RUs em DUs usando Programação Linear Inteira via Pyomo.
+
+    Objetivos Secundário:   "total_distance" -> minimiza soma total das distâncias RU-DU.
+                            "max_link"       -> minimiza o maior enlace individual RU-DU.
+
+    Restrições:
+    1) Cada RU deve ser atendida por exatamente uma DU;
+    2) Distância RU-DU <= MAX_FIBER_DISTANCE_KM;
+    3) Soma das larguras de banda por DU <= MAX_LOAD;
+    4) Cada cluster pode ter no máximo MAX_CLUSTER_SIZE elementos, incluindo a própria DU.
+    """
+
+    # Preparar Variáveis
+    ids = df["id"].astype(int).tolist()
+    id_set = set(ids)
+    loads = df.set_index("id")["bandwidth"].astype(float).to_dict()
+
+    # Pares viáveis (i,j): d(ij)) <= MAX_FIBER_DISTANCE_KM
+    valid_pairs = []
+    distances = {} # Dicionário rápido para acesso (i, j) -> dist
+    neighbors_by_i = {i: [] for i in ids}
+    incoming_by_j = {j: [] for j in ids}
+
+    for i in ids:
+        # Pega a linha da matriz de distancias
+        dists_i = df_dm.loc[i]
+        # Filtra dist <= MAX_FIBER_DISTANCE_KM
+        valid_neighbors = [
+            int(j)
+            for j in dists_i[dists_i <= MAX_FIBER_DISTANCE_KM].index
+            if int(j) in id_set
+        ]
+        if not valid_neighbors:
+            raise ValueError(
+                f"A RU {i} não possui nenhuma DU viável dentro de "
+                f"{MAX_FIBER_DISTANCE_KM} km."
+            )
+        for j in valid_neighbors:
+            valid_pairs.append((i, j))
+            distances[(i, j)] = float(dists_i[j])
+            neighbors_by_i[i].append(j)
+            incoming_by_j[j].append(i)
+        
+    print(f"Iniciando modelagem ILP para {len(ids)} estações...")
+    n_valid_pairs = len(valid_pairs)
+    print(f"Número de pares válidos (i,j) para conexão: {n_valid_pairs}")
+
+    # --- 2. Criação do Modelo  ---
+    m = ConcreteModel("ICARUS_Secundario")
+
+    m.I = Set(initialize=ids, ordered=True)
+    m.A = Set(dimen=2, initialize=valid_pairs, ordered=False)
+    
+    #Parametros
+    m.ru_load = Param(
+        m.I,
+        initialize=lambda mm, i: float(loads[i]),
+        within=NonNegativeReals,
+        mutable=False
+    )
+
+    m.dist = Param(
+        m.A,
+        initialize=lambda mm, i, j: float(distances[(i, j)]),
+        within=NonNegativeReals,
+        mutable=False
+    )
+
+    # Variáveis de Decisão
+    # y[j] = 1 se j é DU
+    m.y = Var(m.I, domain=Binary)        # 1 se j é DU
+    # x[i,j] = 1 se a RU i é atendida pela DU j
+    m.x = Var(m.A, domain=Binary)        
+
+    # Restrições ---
+    # 1) Cada RU i deve ser atendida por exatamente uma DU viável.
+    def assign_rule(mm, i):
+        return sum(mm.x[i, j] for j in neighbors_by_i[i]) == 1
+
+    m.Assign = Constraint(m.I, rule=assign_rule)
+
+    # 2) Capacidade de banda por DU.
+    # Se y[j] = 0, ninguém pode ser atribuído a j.
+    # Se y[j] = 1, a soma das bandas atribuídas a j deve ser <= MAX_LOAD.
+    def cap_rule(mm, j):
+        return (
+            sum(mm.ru_load[i] * mm.x[i, j] for i in incoming_by_j[j])
+            <= float(MAX_LOAD) * mm.y[j]
+        )
+
+    m.Capacity = Constraint(m.I, rule=cap_rule)
+
+    # 3) Ligação lógica: se i conecta em j, então j deve ser DU.
+    def link_rule(mm, i, j):
+        return mm.x[i, j] <= mm.y[j]
+
+    m.Link = Constraint(m.A, rule=link_rule)
+
+    # 4) Se j é DU, a própria RU j deve pertencer ao cluster j.
+    # Isso garante que a própria DU seja contada na capacidade e na cardinalidade.
+    def self_assignment_rule(mm, j):
+        return mm.x[j, j] == mm.y[j]
+
+    m.SelfAssignment = Constraint(m.I, rule=self_assignment_rule)
+
+    # 5) Cada cluster pode ter no máximo 5 elementos, incluindo a própria DU.
+    def max_cluster_size_rule(mm, j):
+        return (
+            sum(mm.x[i, j] for i in incoming_by_j[j])
+            <= MAX_CLUSTER_SIZE * mm.y[j]
+        )
+
+    m.MaxClusterSize = Constraint(m.I, rule=max_cluster_size_rule)
+
+    #adicionado a restrição de número mínimo de DUs ao modelo encontrado no objetivo primario
     m.FixDUCount = Constraint(
         expr=sum(m.y[j] for j in m.I) == best_du_count
     )
-    #desativar o objetivo primário
-    m.Stage1OBJ.deactivate()
-
     msg = ""
+
     #adicionar o objetivo secundário
     if objective_mode == "total_distance":
         msg = "Minimizando a soma total das distâncias RU-DU."
@@ -217,10 +325,33 @@ def cluster_ilp(df: pd.DataFrame, df_dm: pd.DataFrame, objective_mode: str):
             sense=minimize,
         )
     
+    # Configurações do SOLVER
+    TIME_LIMIT_SEC = int(n_valid_pairs * 16)
+    SOLVER = 'cbc'  # 'cbc', 'glpk', 'gurobi', 'cplex'
+    MAX_SOLVER_THREADS = 16
+    THREADS = min(os.cpu_count() or 4, MAX_SOLVER_THREADS)
+
     print(f"{msg} com solver {SOLVER} (threads={THREADS})...")
     print(f"Tempo limite {TIME_LIMIT_SEC} segundos)...")
 
-    opt = configure_solver()
+
+
+    opt = SolverFactory(SOLVER)
+    opt.options.clear()
+    opt.options["ratio"] = 0.0001
+    opt.options["threads"] = int(THREADS)
+    match SOLVER:
+        case "cbc":
+            opt.options["seconds"] = int(TIME_LIMIT_SEC)
+            opt.options["timeMode"] = "elapsed"
+        case "glpk":
+            opt.options["tmlim"] = int(TIME_LIMIT_SEC)
+        case "gurobi" | "gurobi_direct" | "gurobi_persistent":
+            opt.options["TimeLimit"] = float(TIME_LIMIT_SEC)
+        case "cplex" | "cplex_direct" | "cplex_persistent":
+            opt.options["timelimit"] = float(TIME_LIMIT_SEC)
+                
+    
     inicio = time.perf_counter()
     results = opt.solve(m, tee=True)
     fim = time.perf_counter()
@@ -253,7 +384,6 @@ def cluster_ilp(df: pd.DataFrame, df_dm: pd.DataFrame, objective_mode: str):
 
     df["O-DU"] = df["id"].astype(int).map(assignment)
     return df
-
 
 def stats(df, df_dm, output_filename: Path):
     #calcula, imprime e salva estatísticas básicas
@@ -681,7 +811,9 @@ if __name__ == "__main__":
     df_dm.index = df_dm.index.astype(int)
     df_dm.columns = df_dm.columns.astype(int)
 
-    df_cluster = cluster_ilp(df, df_dm, objective_mode="total_distance")
+    #Executando a clusterização ILP
+    best_du_count = cluster_ilp_primario(df, df_dm)
+    df_cluster = cluster_ilp_secundario(df, df_dm, best_du_count, objective_mode="total_distance")
     output_filename = OUT_DIR / f"ilp_{Filename}_total_distance.csv"
     print(f"Gravando o resultado da clusterização em {output_filename}")
     df_cluster.to_csv(output_filename, index=False)
@@ -702,7 +834,7 @@ if __name__ == "__main__":
     #Gerando Arquivo Texto para Pipeline
     generate_csv_to_pipeline(df_cluster, df_dm, output_filename=OUT_DIR / f"pipeline_{Filename}_total_distance.txt")
 
-    df_cluster = cluster_ilp(df, df_dm, objective_mode="max_link")
+    df_cluster = cluster_ilp_secundario(df, df_dm, best_du_count, objective_mode="max_link")
     output_filename = OUT_DIR / f"ilp_{Filename}_max_link.csv"
     print(f"Gravando o resultado da clusterização em {output_filename}")
     df_cluster.to_csv(output_filename, index=False)

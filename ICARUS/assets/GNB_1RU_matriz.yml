@@ -66,12 +66,28 @@ cells:
     prach:
       prach_root_sequence_index: 1
 
+metrics:
+  autostart_stdout_metrics: true
+  enable_json: true
+  layers:
+    enable_app_usage: true
+    enable_sched: true
+    enable_ru: true
+  periodicity:
+    app_usage_report_period: 5000
+    sched_report_period: 5000
+    ru_report_period: 5000
+remote_control:
+  bind_addr: 0.0.0.0
+  port: 8001
+  enabled: true
+
 test_mode:
   test_ue:
     rnti: 0x44
     nof_ues: 1
     ri: 1
-    cqi: 14
+    cqi: 7
     pusch_active: true
     pdsch_active: true
 
