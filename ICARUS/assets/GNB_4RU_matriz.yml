@@ -123,8 +123,6 @@ metrics:
     enable_ru: true
   periodicity:
     app_usage_report_period: 5000
-    sched_report_period: 5000
-    ru_report_period: 5000
 remote_control:
   bind_addr: 0.0.0.0
   port: 8001
