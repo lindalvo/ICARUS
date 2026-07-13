@@ -104,7 +104,11 @@ echo "+ modprobe sch_netem"
 modprobe sch_netem 2>/dev/null || true
 echo ""
 
+STARTUP_TIMEOUT=180
+CHECK_INTERVAL=1
 LINHA_NUM=0
+METRICS_HOST=127.0.0.1
+METRICS_PORT=8001
 
 while IFS= read -r linha || [ -n "$linha" ]; do
     LINHA_NUM=$((LINHA_NUM + 1))
@@ -165,6 +169,18 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     echo "+ mkdir -p $CONFIG_DIR"
     mkdir -p "$CONFIG_DIR"
     echo ""
+
+    echo "Limpando processos Zumbis"
+    for pid in $(pgrep -f 'gnb'); do
+       echo "Encerrando PID GNB : $pid"
+       kill -9 "$pid" 2>/dev/null || true
+    done
+    echo "Limpando processos Zumbis"
+
+    for pid in $(pgrep -f 'ru_emulator'); do
+       echo "Encerrando PID RU_EMULATOR : $pid"
+       kill -9 "$pid" 2>/dev/null || true
+    done
 
     echo "Limpando possível topologia anterior..."
     for ((j=1; j<=MAX_RUS; j++)); do
@@ -605,12 +621,50 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     echo "  RUs NUMA cpunodebind/membind: 1"
     echo ""
 	#armazenando os IDs dos processos para encerrá-los ao final
-	pids=()
-	
+    pids=()
     echo "Executando a GNB $DU_ID:"
     echo "+ numactl --cpunodebind=${GNB_NUMA} --membind=${GNB_NUMA} taskset -c ${GNB_CPUSET} gnb -c ${GNB_YAML} > ${GNB_OUTPUT} 2>&1 &"
     numactl --cpunodebind="$GNB_NUMA" --membind="$GNB_NUMA" taskset -c "$GNB_CPUSET" gnb -c "$GNB_YAML" > "$GNB_OUTPUT" 2>&1 &
-    pids+=($!)
+    GNB_PID=$!
+    pids+=("$GNB_PID")
+    echo "gNB iniciada com PID $GNB_PID."
+    echo "Aguardando o serviço de métricas em ${METRICS_HOST}:${METRICS_PORT} ..."
+    start_time=$(date +%s)
+    while true; do
+      # Verifica se a porta TCP já está aceitando conexões
+      if timeout 1 bash -c \
+          "exec 3<>/dev/tcp/${METRICS_HOST}/${METRICS_PORT}" 2>/dev/null
+      then
+          echo "Serviço de métricas disponível na porta ${METRICS_PORT}."
+          break
+      fi
+
+      # Verifica se a gNB encerrou durante a inicialização
+      if ! kill -0 "$GNB_PID" 2>/dev/null; then
+          echo "ERRO: o processo da gNB encerrou antes de disponibilizar a porta ${METRICS_PORT}." >&2
+          echo "Últimas linhas do log:" >&2
+          tail -n 30 "$GNB_OUTPUT" >&2
+          continue 2
+      fi
+
+      current_time=$(date +%s)
+      elapsed=$((current_time - start_time))
+
+      if (( elapsed >= STARTUP_TIMEOUT )); then
+          echo "ERRO: timeout após ${STARTUP_TIMEOUT}s aguardando a porta ${METRICS_PORT}." >&2
+	  kill -9 $GNB_PID
+          echo "Processo PID ${GNB_PID} da gNB encerrado." >&2
+	  sleep 1
+          echo "Últimas linhas do log:" >&2
+          tail -n 30 "$GNB_OUTPUT" >&2
+          continue 2
+      fi
+
+      printf '\rAguardando a porta %s... %ss/%ss' \
+          "$METRICS_PORT" "$elapsed" "$STARTUP_TIMEOUT"
+
+      sleep "$CHECK_INTERVAL"
+    done
 	
     echo "Executando as ${CONT} RUs Emuladas:"
 

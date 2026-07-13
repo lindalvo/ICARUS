@@ -9,6 +9,12 @@ FULL_PATH=$(realpath ../.$OUT_DIR)
 
 ROUNDTRIPS=30
 
+# armazenando rodadas anteriores
+#
+DATE=$(date +"%Y%m%d%H%M")
+echo "+ mv $FULL_PATH/icarus.db" "$FULL_PATH/icarus$DATE.db"
+mv "${FULL_PATH}/icarus.db" "${FULL_PATH}/icarus${DATE}.db" 2>/dev/null || true
+
 echo "Iniciando processamento dos arquivos em: $FULL_PATH"
 echo "--------------------------------------------------"
 
@@ -51,16 +57,13 @@ for arquivo_caminho in "$FULL_PATH"/pipeline_*.txt; do
             echo "-> Executando rodada $i de $ROUNDTRIPS..."
             
             echo "+ ./run_topology.sh $arquivo_caminho $i $TIPO_CALCULO $IDENTIFICADOR"
-            #./run_topology.sh "$arquivo_caminho" "$i" "$TIPO_CALCULO" "$IDENTIFICADOR"
-            
-            # Opcional: Verifica se o script filho rodou com sucesso
+            ./run_topology.sh "$arquivo_caminho" "$i" "$TIPO_CALCULO" "$IDENTIFICADOR"
             if [ $? -ne 0 ]; then
                 echo "Aviso: O script filho retornou um erro na rodada $i para o arquivo $arquivo_nome"
             fi
         done
 
     else
-        # Opcional: Avisa se o arquivo começava com pipeline_ mas não tinha o resto do padrão correto
         echo "Ignorado (Formato inválido): $arquivo_nome"
     fi
 done

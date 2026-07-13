@@ -12,12 +12,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--seconds",
         required=True,
+        type=int,
         help="Duração da janela em segundos",
     )
 
     parser.add_argument(
         "--roundtrip",
         required=True,
+        type=int,
         help="Rodada de teste para identificar o arquivo de saída. Ex: 1, 2, 3, etc.",
     )
 
@@ -62,7 +64,7 @@ if __name__ == "__main__":
                 throughput_dl = celula["dl"]["ethernet_transmitter"]["average_throughput_mbps"]
                 throughput_ul_total += throughput_ul
                 throughput_dl_total += throughput_dl
-            print(f"Gravando Métrica OFH UL/DL Identificado {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
+            print(f"Gravando Métrica OFH UL/DL Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
             upsert_scenario(identificador, roundtrip, cluster_id, cenario,
                 timestamp_utc=timestamp_utc,
                 metric="ofh_ul_throughput",
@@ -75,11 +77,11 @@ if __name__ == "__main__":
                 value=throughput_dl_total,
                 unit="Mbps"
             )
-
+        # Métricas de Recursos de Hardware
         if "app_resource_usage" in metrica:
             cpu = metrica["app_resource_usage"]["cpu_usage_percent"]
             memoria = metrica["app_resource_usage"]["memory_usage_mb"]
-
+            print(f"Gravando Métrica CPU/Memória Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
             upsert_scenario(identificador, roundtrip, cluster_id, cenario,
                 timestamp_utc=timestamp_utc,
                 metric="cpu_usage",
@@ -92,13 +94,14 @@ if __name__ == "__main__":
                 value=memoria,
                 unit="MB"
             )
-
+        # Métricas do Scheduller
         if "cells" in metrica:
             max_latencies = []
             for celula in metrica["cells"]:
                 pci = celula["ue_list"][0]["pci"]
                 max_latency = celula["cell_metrics"]["max_latency"]
                 max_latencies.append(max_latency)
+            print(f"Gravando Métrica Latência máxima do Sheduller Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
             upsert_scenario(identificador, roundtrip, cluster_id, cenario,
                 timestamp_utc=timestamp_utc,
                 metric="max_scheduler_latency",

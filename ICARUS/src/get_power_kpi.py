@@ -203,9 +203,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--seconds",
-        required=True,
-        help="Duração da janela em segundos",
+        "--start",
+        required=False,
+        help="Início da janela no formato 2026-06-27T13:01:00.000Z",
     )
 
     parser.add_argument(
