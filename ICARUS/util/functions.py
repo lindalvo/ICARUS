@@ -1,5 +1,7 @@
 from typing import Iterable, Tuple, List
 from math import radians, sin, cos, atan2, sqrt
+from datetime import datetime, timezone
+
 EARTH_RADIUS_KM: float = 6371.0
 
 def designacao_para_mhz(designacao: str) -> int:
@@ -28,3 +30,24 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     a = sin(dphi/2)**2 + cos(phi1)*cos(phi2)*sin(dlambda/2)**2
     c = 2 * atan2(sqrt(a), sqrt(1-a))
     return EARTH_RADIUS_KM * c
+
+def normalize_timestamp_utc(timestamp):
+    if isinstance(timestamp, datetime):
+        dt = timestamp
+    else:
+        timestamp = str(timestamp)
+
+        if timestamp.endswith("Z"):
+            timestamp = timestamp[:-1] + "+00:00"
+
+        dt = datetime.fromisoformat(timestamp)
+
+    if dt.tzinfo is None:
+        # Somente está correto se o timestamp sem timezone já representar UTC.
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+
+    return dt.isoformat(
+        timespec="milliseconds"
+    ).replace("+00:00", "Z")

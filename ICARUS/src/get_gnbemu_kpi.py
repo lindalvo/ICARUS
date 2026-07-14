@@ -1,6 +1,7 @@
 import argparse
 import json
 import time
+from ICARUS.util.functions import normalize_timestamp_utc
 import websocket
 from dotenv import find_dotenv, load_dotenv
 from ICARUS.util.sqlite import init_db, upsert_scenario
@@ -51,8 +52,7 @@ if __name__ == "__main__":
     while time.monotonic() - inicio < args.seconds:
         mensagem = ws.recv()
         metrica = json.loads(mensagem)
-        timestamp = metrica["timestamp"]
-        timestamp_utc = f"{timestamp}Z"
+        timestamp_utc = normalize_timestamp_utc(metrica["timestamp"])
         # Métricas do Open Fronthaul
         if "ru" in metrica:
             celulas_ofh = metrica["ru"]["ofh"]["cells"]
@@ -98,16 +98,15 @@ if __name__ == "__main__":
         if "cells" in metrica:
             max_latencies = []
             for celula in metrica["cells"]:
-                pci = celula["ue_list"][0]["pci"]
                 max_latency = celula["cell_metrics"]["max_latency"]
                 max_latencies.append(max_latency)
             print(f"Gravando Métrica Latência máxima do Sheduller Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
-            upsert_scenario(identificador, roundtrip, cluster_id, cenario,
-                timestamp_utc=timestamp_utc,
-                metric="max_scheduler_latency",
-                value=max(max_latencies),
-                unit="µs"
-            )
-
+            if max_latencies:
+                upsert_scenario(identificador, roundtrip, cluster_id, cenario,
+                    timestamp_utc=timestamp_utc,
+                    metric="max_scheduler_latency",
+                    value=max(max_latencies),
+                    unit="µs"
+                )
 
     ws.close()

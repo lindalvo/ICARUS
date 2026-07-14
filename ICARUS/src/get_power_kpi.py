@@ -7,6 +7,7 @@ from dotenv import find_dotenv, load_dotenv
 import pandas as pd
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
+from ICARUS.util.functions import normalize_timestamp_utc
 from ICARUS.util.sqlite import init_db, upsert_scenario
 load_dotenv(find_dotenv())
 
@@ -175,7 +176,7 @@ def collect_vcenter_vm_metrics(start: str, end: str) -> pd.DataFrame:
 
                 rows.append(
                     {
-                        "timestamp_utc": sample_info.timestamp,
+                        "timestamp_utc": normalize_timestamp_utc(sample_info.timestamp),
                         "interval_sec": sample_info.interval,
                         "metric": metric_name,
                         "value": adjusted_value,

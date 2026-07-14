@@ -29,40 +29,57 @@ def init_db():
             metric TEXT NOT NULL,
             value REAL NOT NULL,
             unit TEXT,
-            PRIMARY KEY (identificador, roundtrip, cluster_id, cenario)
+            PRIMARY KEY (identificador, roundtrip, cluster_id, cenario, timestamp_utc, metric)
         )
         """)
 
 
-def upsert_scenario(identificador, roundtrip, cluster_id, cenario, **fields):
-    if not fields:
-        return
+def upsert_scenario(
+    identificador,
+    roundtrip,
+    cluster_id,
+    cenario,
+    timestamp_utc,
+    metric,
+    value,
+    unit
+):
+    sql = """
+    INSERT INTO stats (
+        identificador,
+        roundtrip,
+        cluster_id,
+        cenario,
+        timestamp_utc,
+        metric,
+        value,
+        unit
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 
-    base = {
-        "identificador": identificador,
-        "roundtrip": roundtrip,
-        "cluster_id": cluster_id,
-        "cenario": cenario,
-        **fields
-    }
-
-    columns = list(base.keys())
-    placeholders = ", ".join("?" for _ in columns)
-    column_names = ", ".join(columns)
-
-    update_columns = [c for c in fields.keys()]
-    update_clause = ", ".join(f"{c} = excluded.{c}" for c in update_columns)
-
-    sql = f"""
-    INSERT INTO stats ({column_names})
-    VALUES ({placeholders})
-    ON CONFLICT(identificador, roundtrip, cluster_id, cenario)
-    DO UPDATE SET {update_clause}
+    ON CONFLICT (
+        identificador,
+        roundtrip,
+        cluster_id,
+        cenario,
+        timestamp_utc,
+        metric
+    )
+    DO UPDATE SET
+        value = excluded.value,
+        unit = excluded.unit
     """
 
-    values = [base[c] for c in columns]
+    values = (
+        identificador,
+        roundtrip,
+        cluster_id,
+        cenario,
+        timestamp_utc,
+        metric,
+        value,
+        unit
+    )
 
     with _get_connection() as conn:
         conn.execute(sql, values)
-        conn.commit()
-
