@@ -79,21 +79,47 @@ if __name__ == "__main__":
             )
         # Métricas de Recursos de Hardware
         if "app_resource_usage" in metrica:
-            cpu = metrica["app_resource_usage"]["cpu_usage_percent"]
-            memoria = metrica["app_resource_usage"]["memory_usage_mb"]
-            print(f"Gravando Métrica CPU/Memória Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
-            upsert_scenario(identificador, roundtrip, cluster_id, cenario,
-                timestamp_utc=timestamp_utc,
-                metric="cpu_usage",
-                value=cpu,
-                unit="%"
-            )
-            upsert_scenario(identificador, roundtrip, cluster_id, cenario,
-                timestamp_utc=timestamp_utc,
-                metric="memory_usage",
-                value=memoria,
-                unit="MB"
-            )
+            recursos = metrica["app_resource_usage"]
+
+            cpu = recursos.get("cpu_usage_percent")
+            memoria = recursos.get("memory_usage_mb")
+            potencia = recursos.get("power_consumption_watts")
+
+            if cpu is not None:
+                upsert_scenario(
+                    identificador,
+                    roundtrip,
+                    cluster_id,
+                    cenario,
+                    timestamp_utc=timestamp_utc,
+                    metric="cpu_usage",
+                    value=cpu,
+                    unit="%",
+                )
+
+            if memoria is not None:
+                upsert_scenario(
+                    identificador,
+                    roundtrip,
+                    cluster_id,
+                    cenario,
+                    timestamp_utc=timestamp_utc,
+                    metric="memory_usage",
+                    value=memoria,
+                    unit="MB",
+                )
+            
+            if potencia is not None:
+                upsert_scenario(
+                    identificador,
+                    roundtrip,
+                    cluster_id,
+                    cenario,
+                    timestamp_utc=timestamp_utc,
+                    metric="cpu_package_power",
+                    value=potencia,
+                    unit="W",
+                )
         # Métricas do Scheduller
         if "cells" in metrica:
             max_latencies = []

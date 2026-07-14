@@ -106,8 +106,8 @@ metrics:
     enable_sched: true
     enable_ru: true
   periodicity:
-    app_usage_report_period: 5000
-    du_report_period: 5000
+    app_usage_report_period: 1000
+    du_report_period: 1000
 remote_control:
   bind_addr: 0.0.0.0
   port: 8001

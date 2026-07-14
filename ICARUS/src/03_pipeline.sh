@@ -7,7 +7,7 @@ set +a
 
 FULL_PATH=$(realpath ../.$OUT_DIR)
 
-ROUNDTRIPS=30
+ROUNDTRIPS=10
 
 # armazenando rodadas anteriores
 #
