@@ -104,6 +104,7 @@ CHECK_INTERVAL=1
 LINHA_NUM=0
 METRICS_HOST=127.0.0.1
 METRICS_PORT=8001
+DELAY_BASE_DL_US=50
 
 while IFS= read -r linha || [ -n "$linha" ]; do
     LINHA_NUM=$((LINHA_NUM + 1))
@@ -432,16 +433,14 @@ while IFS= read -r linha || [ -n "$linha" ]; do
 
         echo "+ ip netns exec $NS ip link set dev $RU_IF up"
         ip netns exec "$NS" ip link set dev "$RU_IF" up
+        
+        delay_dl_us=$((DELAY_BASE_DL_US + DELAY_US))
 
-        if [ "$DELAY_US" -gt 0 ]; then
-            echo "+ tc qdisc replace dev $DU_IF root netem delay ${DELAY_US}us"
-            tc qdisc replace dev "$DU_IF" root netem delay "${DELAY_US}us"
+        echo "+ tc qdisc replace dev $DU_IF root netem delay ${delay_dl_us}us"
+        tc qdisc replace dev "$DU_IF" root netem delay "${delay_dl_us}us"
 
-            echo "+ ip netns exec $NS tc qdisc replace dev $RU_IF root netem delay ${DELAY_US}us"
-            ip netns exec "$NS" tc qdisc replace dev "$RU_IF" root netem delay "${DELAY_US}us"
-        else
-            echo "- delay 0 us: nenhum qdisc netem aplicado em $DU_IF/$RU_IF"
-        fi
+        echo "+ ip netns exec $NS tc qdisc replace dev $RU_IF root netem delay ${DELAY_US}us"
+        ip netns exec "$NS" tc qdisc replace dev "$RU_IF" root netem delay "${DELAY_US}us"
 
         echo ""
         echo "Gerando YAML da RU $CONT..."
