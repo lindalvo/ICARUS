@@ -82,7 +82,7 @@ if __name__ == "__main__":
             recursos = metrica["app_resource_usage"]
 
             cpu = recursos.get("cpu_usage_percent")
-            memoria = recursos.get("memory_usage_mb")
+            memoria = recursos.get("mem_total_mb")
             potencia = recursos.get("power_consumption_watts")
 
             if cpu is not None:
