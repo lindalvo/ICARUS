@@ -687,7 +687,7 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     done
 
     echo "============================================================"
-    echo "       Executando a topologia por 90 Segundos para coleta de métricas de desempenho"           "
+    echo "       Executando a topologia por 90 Segundos para coleta de métricas de desempenho"
     echo "============================================================"
 	DATA_INICIO=$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')
     echo ""
