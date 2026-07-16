@@ -697,13 +697,6 @@ while IFS= read -r linha || [ -n "$linha" ]; do
 	DATA_FIM=$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')
     echo "Fim: $DATA_FIM" 
     echo ""
-    echo "============================================================"
-    echo "Coletando Métricas de consumo de energia da VM entre $DATA_INICIO e $DATA_FIM "
-    echo "============================================================"
-    echo ""
-    echo "+ poetry run python ./get_power_kpi.py --start ${DATA_INICIO} --end ${DATA_FIM} --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}" 
-    poetry run python ./get_power_kpi.py --start $DATA_INICIO --end $DATA_FIM --clusterid $DU_ID --roundtrip $ROUNDTRIP --cenario $CENARIO --identificador $IDENTIFICADOR
-    echo ""
     echo ""
     echo "============================================================"
     echo "         Encerrando a GNB $DU_ID e $CONT RUs Emuladas       "
