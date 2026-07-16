@@ -92,7 +92,7 @@ test_mode:
 
 expert_execution:
   cell_affinities:
-    - ru_cpus: 40,41
+    - ru_cpus: 5,7
       ru_pinning: mask
   threads:
     upper_phy:
@@ -102,7 +102,7 @@ expert_execution:
       max_pusch_and_srs_concurrency: 1
       max_pdsch_concurrency: 1
     lower_phy:
-      execution_profile: single
+      execution_profile: dual
 
   queues:
     cu_up_dl_ue_executor_queue_size: 8192

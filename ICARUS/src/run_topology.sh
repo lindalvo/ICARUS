@@ -75,19 +75,14 @@ set +a
 
 RU_MATRIZ="${SCRIPT_DIR}/../assets/ru_matriz.yml"
 
-VCPUS_TOTAL=48
-
 echo "========================================"
 echo "Arquivo de entrada: $ARQUIVO"
 echo "Diretório do script: $SCRIPT_DIR"
 echo "Matriz YAML das RUs: $RU_MATRIZ"
 echo "Matrizes YAML da GNB: ${SCRIPT_DIR}/../assets/GNB_<N>RU_matriz.yml"
 echo "Diretório base de saída: ${OUT_DIR}"
-echo "vCPUs totais consideradas no script: $VCPUS_TOTAL"
-echo "Housekeeping reservado: CPUs 0-1"
-echo "CPUs OpenRAN disponíveis: 2-47"
-echo "NUMA node0: CPUs 0-23"
-echo "NUMA node1: CPUs 24-47"
+echo "vCPUs totais consideradas no script: $CPUS_TOTAL"
+echo "Housekeeping reservado: CPUs ${HOUSEKEEPING_CPUSET}"
 echo "MTU fixo: $MTU"
 echo "txqueuelen fixo: $TXQLEN"
 echo "Máximo de RUs por GNB/DU: $MAX_RUS"
@@ -104,7 +99,7 @@ echo "+ modprobe sch_netem"
 modprobe sch_netem 2>/dev/null || true
 echo ""
 
-STARTUP_TIMEOUT=180
+STARTUP_TIMEOUT=60
 CHECK_INTERVAL=1
 LINHA_NUM=0
 METRICS_HOST=127.0.0.1
@@ -473,30 +468,30 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     GNB_NUMA="0,1"
 
     if [ "$CONT" -eq 1 ]; then
-        GNB_CPUSET="2-41"
-        RU1_CPUSET="42-47"
+        GNB_CPUSET="4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,52,54,56,58,60,62,64,66,68,70,72,74,76,78,80,82,84,86,88,90,92,94,5,7,9,11,13,15,17,19,21,23,25,27,29,31,33,35,37,39,53,55,57,59,61,63,65,67,69,71,73,75,77,79,81,83,85,87"
+        RU1_CPUSET="41,43,45,47,89,91,93,95"
     elif [ "$CONT" -eq 2 ]; then
-        GNB_CPUSET="2-39"
-        RU1_CPUSET="40-43"
-        RU2_CPUSET="44-47"
+        GNB_CPUSET="4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,52,54,56,58,60,62,64,66,68,70,72,74,76,78,80,82,84,86,88,90,92,94,5,7,9,11,13,15,17,19,21,23,25,27,29,31,53,55,57,59,61,63,65,67,69,71,73,75,77,79"
+        RU1_CPUSET="33,35,37,39,81,83,85,87"
+        RU2_CPUSET="41,43,45,47,89,91,93,95"
     elif [ "$CONT" -eq 3 ]; then
-        GNB_CPUSET="2-35"
-        RU1_CPUSET="36-39"
-        RU2_CPUSET="40-43"
-        RU3_CPUSET="44-47"
+        GNB_CPUSET="4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,52,54,56,58,60,62,64,66,68,70,72,74,76,78,80,82,84,86,88,90,92,94,5,7,9,11,13,15,17,19,21,23,53,55,57,59,61,63,65,67,69,71"
+        RU1_CPUSET="25,27,29,31,73,75,77,79"
+        RU2_CPUSET="33,35,37,39,81,83,85,87"
+        RU3_CPUSET="41,43,45,47,89,91,93,95"
     elif [ "$CONT" -eq 4 ]; then
-        GNB_CPUSET="2-31"
-        RU1_CPUSET="32-35"
-        RU2_CPUSET="36-39"
-        RU3_CPUSET="40-43"
-        RU4_CPUSET="43-47"
+        GNB_CPUSET="4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,52,54,56,58,60,62,64,66,68,70,72,74,76,78,80,82,84,86,88,90,92,94,5,7,9,11,13,15,17,19,21,23,53,55,57,59,61,63,65,67,69,71"
+        RU1_CPUSET="25,27,29,73,75,77"
+        RU2_CPUSET="31,33,35,79,81,83"
+        RU3_CPUSET="37,39,41,85,87,89"
+        RU4_CPUSET="43,45,47,91,93,95"
     elif [ "$CONT" -eq 5 ]; then
-        GNB_CPUSET="2-27"
-        RU1_CPUSET="28-31"
-        RU2_CPUSET="32-35"
-        RU3_CPUSET="36-39"
-        RU4_CPUSET="40-43"
-        RU5_CPUSET="44-47"
+        GNB_CPUSET="4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,52,54,56,58,60,62,64,66,68,70,72,74,76,78,80,82,84,86,88,90,92,94,5,7,9,11,13,15,17,19,21,23,53,55,57,59,61,63,65,67,69,71"
+        RU1_CPUSET="25,27,73,75"
+        RU2_CPUSET="29,31,77,79"
+        RU3_CPUSET="33,35,81,83"
+        RU4_CPUSET="37,39,41,85,87,89"
+        RU5_CPUSET="43,45,47,91,93,95"
     fi
 
     GNB_MATRIZ="${SCRIPT_DIR}/../assets/GNB_${CONT}RU_matriz.yml"

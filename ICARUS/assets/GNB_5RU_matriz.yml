@@ -150,21 +150,21 @@ test_mode:
     rnti: 0x44
     nof_ues: 1
     ri: 1
-    cqi: 14
+    cqi: 7
     pusch_active: true
     pdsch_active: true
 
 expert_execution:
   cell_affinities:
-    - ru_cpus: 19,20
+    - ru_cpus: 5,7
       ru_pinning: mask
-    - ru_cpus: 21,22
+    - ru_cpus: 9,11
       ru_pinning: mask
-    - ru_cpus: 23,24
+    - ru_cpus: 13,15
       ru_pinning: mask
-    - ru_cpus: 24,25
+    - ru_cpus: 17,19
       ru_pinning: mask
-    - ru_cpus: 26,27
+    - ru_cpus: 21,23
       ru_pinning: mask
   threads:
     upper_phy:
@@ -174,7 +174,7 @@ expert_execution:
       max_pusch_and_srs_concurrency: 1
       max_pdsch_concurrency: 1
     lower_phy:
-      execution_profile: single
+      execution_profile: dual
 
   queues:
     cu_up_dl_ue_executor_queue_size: 8192
