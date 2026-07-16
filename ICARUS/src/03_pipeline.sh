@@ -34,14 +34,14 @@ for arquivo_caminho in "$FULL_PATH"/pipeline_*.txt; do
     # Expressão Regular para validar o formato exato:
     # ^pipeline_             -> Começa com pipeline_
     # [0-9]{11}_[0-9]{7}_    -> 11 dígitos, underline, 7 dígitos, underline
-    # (max_link|total_distance) -> Uma das duas opções de texto
+    # (max_load|total_distance) -> Uma das duas opções de texto
     # \.txt$                 -> Termina obrigatoriamente com .txt
-    regex="^pipeline_([0-9]{11}_[0-9]{7})_(max_link|total_distance)\.txt$"
+    regex="^pipeline_([0-9]{11}_[0-9]{7})_(max_load|total_distance)\.txt$"
 
     if [[ "$arquivo_nome" =~ $regex ]]; then
         # Captura os grupos da expressão regular
         # ${BASH_REMATCH[1]} captura o bloco do identificador (11 dígitos + _ + 7 dígitos)
-        # ${BASH_REMATCH[2]} captura o tipo de cálculo (max_link ou total_distance)
+        # ${BASH_REMATCH[2]} captura o tipo de cálculo (max_load ou total_distance)
         IDENTIFICADOR="${BASH_REMATCH[1]}"
         TIPO_CALCULO="${BASH_REMATCH[2]}"
 

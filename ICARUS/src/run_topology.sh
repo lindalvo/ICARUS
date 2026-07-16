@@ -33,7 +33,7 @@ fi
 
 if [ -z "${2:-}" ]; then
     echo "Erro: O segundo parâmetro (iteração) é obrigatório."
-    echo "Uso: $0 <arquivo> <1-99> <max_link|total_distance> <identificador>"
+    echo "Uso: $0 <arquivo> <1-99> <max_load|total_distance> <identificador>"
     exit 1
 fi
 
@@ -47,21 +47,21 @@ fi
 
 if [ -z "${3:-}" ]; then
     echo "Erro: O terceiro parâmetro (cenário) é obrigatório."
-    echo "Uso: $0 <arquivo> <1-99> <max_link|total_distance> <identificador>"
+    echo "Uso: $0 <arquivo> <1-99> <max_load|total_distance> <identificador>"
     exit 1
 fi
 
 CENARIO="$3"
 
 # Verifica se o valor é exatamente uma das duas opções permitidas
-if [ "$CENARIO" != "max_link" ] && [ "$CENARIO" != "total_distance" ]; then
-    echo "Erro: O parâmetro '$CENARIO' é inválido. Escolha entre 'max_link' ou 'total_distance'."
+if [ "$CENARIO" != "max_load" ] && [ "$CENARIO" != "total_distance" ]; then
+    echo "Erro: O parâmetro '$CENARIO' é inválido. Escolha entre 'max_load' ou 'total_distance'."
     exit 1
 fi
 
 if [ -z "${4:-}" ]; then
     echo "Erro: O quarto parâmetro (identificador) é obrigatório."
-    echo "Uso: $0 <arquivo> <1-99> <max_link|total_distance> <identificador>"
+    echo "Uso: $0 <arquivo> <1-99> <max_load|total_distance> <identificador>"
     exit 1
 fi
 

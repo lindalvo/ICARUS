@@ -183,7 +183,7 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
     Clusteriza RUs em DUs usando Programação Linear Inteira via Pyomo.
 
     Objetivos Secundário:   "total_distance" -> minimiza soma total das distâncias RU-DU.
-                            "max_link"       -> minimiza o maior enlace individual RU-DU.
+                            "max_load"       -> minimiza a maior carga agregada atribuída a uma DU.
 
     Restrições:
     1) Cada RU deve ser atendida por exatamente uma DU;
@@ -311,17 +311,22 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
             sense=minimize
         )
 
-    elif objective_mode == "max_link":
-        msg = "Minimizando o maior enlace individual RU-DU."
-        m.MaxLinkDistance = Var(domain=NonNegativeReals)
+    elif objective_mode == "max_load":
+        msg = "Minimizando a maior carga agregada por DU."
 
-        def max_link_rule(mm, i, j):
-            return mm.MaxLinkDistance >= mm.dist[i, j] * mm.x[i, j]
+        # Lmax representa a maior carga de processamento entre todas as DUs.
+        m.MaxDULoad = Var(domain=NonNegativeReals)
 
-        m.MaxLinkConstraint = Constraint(m.A, rule=max_link_rule)
+        def max_load_rule(mm, j):
+            return mm.MaxDULoad >= sum(
+                mm.ru_load[i] * mm.x[i, j]
+                for i in incoming_by_j[j]
+            )
+
+        m.MaxLoadConstraint = Constraint(m.I, rule=max_load_rule)
 
         m.Stage2OBJ = Objective(
-            expr=m.MaxLinkDistance,
+            expr=m.MaxDULoad,
             sense=minimize,
         )
     
@@ -333,8 +338,6 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
 
     print(f"{msg} com solver {SOLVER} (threads={THREADS})...")
     print(f"Tempo limite {TIME_LIMIT_SEC} segundos)...")
-
-
 
     opt = SolverFactory(SOLVER)
     opt.options.clear()
@@ -834,8 +837,8 @@ if __name__ == "__main__":
     #Gerando Arquivo Texto para Pipeline
     generate_csv_to_pipeline(df_cluster, df_dm, output_filename=OUT_DIR / f"pipeline_{Filename}_total_distance.txt")
 
-    df_cluster = cluster_ilp_secundario(df, df_dm, best_du_count, objective_mode="max_link")
-    output_filename = OUT_DIR / f"ilp_{Filename}_max_link.csv"
+    df_cluster = cluster_ilp_secundario(df, df_dm, best_du_count, objective_mode="max_load")
+    output_filename = OUT_DIR / f"ilp_{Filename}_max_load.csv"
     print(f"Gravando o resultado da clusterização em {output_filename}")
     df_cluster.to_csv(output_filename, index=False)
 
@@ -844,14 +847,14 @@ if __name__ == "__main__":
     #df_cluster = pd.read_csv(output_filename)
     
     #gravando as estatísticas em um arquivo CSV
-    stats(df_cluster, df_dm, output_filename=OUT_DIR / f"stats_{Filename}_max_link.csv")
+    stats(df_cluster, df_dm, output_filename=OUT_DIR / f"stats_{Filename}_max_load.csv")
 
     #checando regras do cluster foram respeitadas
     check_rules(df_cluster, df_dm)
     
     #Gerando Mapa
-    generate_map(df_cluster, df_dm, output_filename=OUT_DIR / f"map_{Filename}_max_link.html")
+    generate_map(df_cluster, df_dm, output_filename=OUT_DIR / f"map_{Filename}_max_load.html")
 
     #Gerando Arquivo Texto para Pipeline
-    generate_csv_to_pipeline(df_cluster, df_dm, output_filename=OUT_DIR / f"pipeline_{Filename}_max_link.txt")
+    generate_csv_to_pipeline(df_cluster, df_dm, output_filename=OUT_DIR / f"pipeline_{Filename}_max_load.txt")
 
