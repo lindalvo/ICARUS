@@ -64,7 +64,7 @@ if __name__ == "__main__":
                 throughput_dl = celula["dl"]["ethernet_transmitter"]["average_throughput_mbps"]
                 throughput_ul_total += throughput_ul
                 throughput_dl_total += throughput_dl
-            print(f"Gravando Métrica OFH UL/DL Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
+            #print(f"Gravando Métrica OFH UL/DL Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
             upsert_scenario(identificador, roundtrip, cluster_id, cenario,
                 timestamp_utc=timestamp_utc,
                 metric="ofh_ul_throughput",
@@ -96,7 +96,7 @@ if __name__ == "__main__":
                     value=cpu,
                     unit="%",
                 )
-                print(f"Gravando Métrica CPU Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
+                #print(f"Gravando Métrica CPU Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
                 
             if memoria is not None:
                 upsert_scenario(
@@ -109,7 +109,7 @@ if __name__ == "__main__":
                     value=memoria,
                     unit="MB",
                 )
-                print(f"Gravando Métrica Memória Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
+                #print(f"Gravando Métrica Memória Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
 
             if potencia is not None:
                 upsert_scenario(
@@ -122,14 +122,14 @@ if __name__ == "__main__":
                     value=potencia,
                     unit="W",
                 )
-                print(f"Gravando Métrica Consumo de Energia Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
+                #print(f"Gravando Métrica Consumo de Energia Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
         # Métricas do Scheduller
         if "cells" in metrica:
             max_latencies = []
             for celula in metrica["cells"]:
                 max_latency = celula["cell_metrics"]["max_latency"]
                 max_latencies.append(max_latency)
-            print(f"Gravando Métrica Latência máxima do Sheduller Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
+            #print(f"Gravando Métrica Latência máxima do Sheduller Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
             if max_latencies:
                 upsert_scenario(identificador, roundtrip, cluster_id, cenario,
                     timestamp_utc=timestamp_utc,
