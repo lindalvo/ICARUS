@@ -96,7 +96,8 @@ if __name__ == "__main__":
                     value=cpu,
                     unit="%",
                 )
-
+                print(f"Gravando Métrica CPU Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
+                
             if memoria is not None:
                 upsert_scenario(
                     identificador,
@@ -108,7 +109,8 @@ if __name__ == "__main__":
                     value=memoria,
                     unit="MB",
                 )
-            
+                print(f"Gravando Métrica Memória Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
+
             if potencia is not None:
                 upsert_scenario(
                     identificador,
@@ -120,6 +122,7 @@ if __name__ == "__main__":
                     value=potencia,
                     unit="W",
                 )
+                print(f"Gravando Métrica Consumo de Energia Identificador {identificador} rodada {roundtrip} cluster {cluster_id} cenário {cenario} no banco de dados")
         # Métricas do Scheduller
         if "cells" in metrica:
             max_latencies = []

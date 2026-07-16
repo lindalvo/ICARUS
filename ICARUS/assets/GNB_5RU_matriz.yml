@@ -15,7 +15,7 @@ ru_ofh:
   t1a_min_cp_dl: 250
   t1a_max_cp_ul: 590
   t1a_min_cp_ul: 150
-  t1a_max_up: 365
+  t1a_max_up: 300
   t1a_min_up: 80
   ta4_max: 500
   ta4_min: 10

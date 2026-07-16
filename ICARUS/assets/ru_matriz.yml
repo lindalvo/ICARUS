@@ -23,4 +23,4 @@ ru_emu:
       t2a_max_cp_ul: 590
       t2a_min_cp_ul: 150
       t2a_max_up: 365
-      t2a_min_up: 80
+      t2a_min_up: 70
