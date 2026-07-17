@@ -419,12 +419,6 @@ while IFS= read -r linha || [ -n "$linha" ]; do
 		echo "+ ip netns exec $NS ethtool -K $RU_IF gro off gso off tso off rx off tx off"
 		ip netns exec "$NS" ethtool -K "$RU_IF" gro off gso off tso off rx off tx off
 		
-        echo "+ ip link set dev $DU_IF promisc on"
-        ip link set dev "$DU_IF" promisc on
-
-        echo "+ ip netns exec $NS ip link set dev $RU_IF promisc on"
-        ip netns exec "$NS" ip link set dev "$RU_IF" promisc on
-
         echo "+ ip link set dev $DU_IF up"
         ip link set dev "$DU_IF" up
 

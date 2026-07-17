@@ -13,6 +13,7 @@ ROUND_COORD_DECIMALS = 5  # ~1.1m em latitude; longitude ~1.1m*cos(lat)
 Filename = os.environ["Filename"]
 OUT_DIR = Path(os.environ["OUT_DIR"]).resolve()
 
+
 def main() -> int:
     N_total_linhas = 0
     N_NotNR_Servico10 = 0
@@ -45,7 +46,8 @@ def main() -> int:
     # Coerção numérica das coordenadas (evita string/NaN quebrando round/groupby)
     df["Latitude"] = pd.to_numeric(df["Latitude"], errors="coerce")
     df["Longitude"] = pd.to_numeric(df["Longitude"], errors="coerce")
-    df = df.dropna(subset=["Latitude", "Longitude"])
+    df["NumEstacao"] = pd.to_numeric(df["NumEstacao"], errors="coerce").astype("Int64")
+    df = df.dropna(subset=["Latitude", "Longitude"]).copy()
     novo_tamanho = len(df)
     N_CoordenadasInvalidas += (tamanho_corrente - novo_tamanho)
     tamanho_corrente = novo_tamanho
@@ -59,7 +61,7 @@ def main() -> int:
     df["Lon"] = df["Longitude"].round(ROUND_COORD_DECIMALS)
     # coordenada, somando os PRBs de todas as designações daquela coordenada.
     df_grouped = (
-        df.groupby(["Lat", "Lon"], as_index=False)
+        df.groupby(["NumEstacao", "Lat", "Lon"], as_index=False)
             .agg(
                 N_Latitude=("Latitude", "nunique"),
                 N_Longitude=("Longitude", "nunique"),
@@ -73,11 +75,13 @@ def main() -> int:
             )
     )
 
+    # Força tipo texto
+    df_grouped["NumEstacao"] = df_grouped["NumEstacao"].astype("string")
+
     count_grouped = len(df_grouped)
-    df_grouped.insert(0, 'id', range(1, count_grouped + 1))
     #Reordenar colunas
     df_grouped = df_grouped[
-        ["id", "Lat", "Lon", "bandwidth",
+        ["NumEstacao", "Lat", "Lon", "bandwidth",
         "N_Latitude", "N_Longitude", "Latitudes", "Longitudes",
         "N_Designacoes", "Designacoes", "N_Setores", "Setores"]
     ]
@@ -90,15 +94,15 @@ def main() -> int:
     out_path = OUT_DIR / f"dm_{Filename}.csv"
     matriz = pd.DataFrame(
         data=0.0,
-        index=df_grouped['id'],
-        columns=df_grouped['id']
+        index=df_grouped['NumEstacao'],
+        columns=df_grouped['NumEstacao']
     )
     for i in range(count_grouped):
-        id_i = df_grouped.loc[i, "id"]
+        id_i = df_grouped.loc[i, "NumEstacao"]
         lat_i = df_grouped.loc[i, "Lat"]
         lon_i = df_grouped.loc[i, "Lon"]
         for j in range(i, count_grouped):
-            id_j = df_grouped.loc[j, "id"]
+            id_j = df_grouped.loc[j, "NumEstacao"]
             if i == j:
                 matriz.loc[id_i, id_j] = 0.0
             else:
@@ -110,7 +114,7 @@ def main() -> int:
 
     # Salvando a matriz de distâncias em um arquivo CSV
     print(f"\t Salvando Matriz de distâncias: {out_path}")
-    matriz.to_csv(out_path, index=True, index_label="id")
+    matriz.to_csv(out_path, index=True, index_label="NumEstacao")
     return 0
 
 if __name__ == "__main__":

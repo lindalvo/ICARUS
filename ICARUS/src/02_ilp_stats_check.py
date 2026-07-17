@@ -33,17 +33,17 @@ def cluster_ilp_primario(df: pd.DataFrame, df_dm: pd.DataFrame):
     """
 
     # Preparar Variáveis
-    ids = df["id"].astype(int).tolist()
-    id_set = set(ids)
-    loads = df.set_index("id")["bandwidth"].astype(float).to_dict()
+    NumEstacoes = df["NumEstacao"].astype(int).tolist()
+    id_set = set(NumEstacoes)
+    loads = df.set_index("NumEstacao")["bandwidth"].astype(float).to_dict()
 
     # Pares viáveis (i,j): d(ij)) <= MAX_FIBER_DISTANCE_KM
     valid_pairs = []
     distances = {} # Dicionário rápido para acesso (i, j) -> dist
-    neighbors_by_i = {i: [] for i in ids}
-    incoming_by_j = {j: [] for j in ids}
+    neighbors_by_i = {i: [] for i in NumEstacoes}
+    incoming_by_j = {j: [] for j in NumEstacoes}
 
-    for i in ids:
+    for i in NumEstacoes:
         # Pega a linha da matriz de distancias
         dists_i = df_dm.loc[i]
         # Filtra dist <= MAX_FIBER_DISTANCE_KM
@@ -63,14 +63,14 @@ def cluster_ilp_primario(df: pd.DataFrame, df_dm: pd.DataFrame):
             neighbors_by_i[i].append(j)
             incoming_by_j[j].append(i)
         
-    print(f"Iniciando modelagem ILP para {len(ids)} estações...")
+    print(f"Iniciando modelagem ILP para {len(NumEstacoes)} estações...")
     n_valid_pairs = len(valid_pairs)
     print(f"Número de pares válidos (i,j) para conexão: {n_valid_pairs}")
 
     # --- 2. Criação do Modelo  ---
     m = ConcreteModel("ICARUS_Primario")
 
-    m.I = Set(initialize=ids, ordered=True)
+    m.I = Set(initialize=NumEstacoes, ordered=True)
     m.A = Set(dimen=2, initialize=valid_pairs, ordered=False)
     
     #Parametros
@@ -193,17 +193,17 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
     """
 
     # Preparar Variáveis
-    ids = df["id"].astype(int).tolist()
-    id_set = set(ids)
-    loads = df.set_index("id")["bandwidth"].astype(float).to_dict()
+    NumEstacoes = df["NumEstacao"].astype(int).tolist()
+    id_set = set(NumEstacoes)
+    loads = df.set_index("NumEstacao")["bandwidth"].astype(float).to_dict()
 
     # Pares viáveis (i,j): d(ij)) <= MAX_FIBER_DISTANCE_KM
     valid_pairs = []
     distances = {} # Dicionário rápido para acesso (i, j) -> dist
-    neighbors_by_i = {i: [] for i in ids}
-    incoming_by_j = {j: [] for j in ids}
+    neighbors_by_i = {i: [] for i in NumEstacoes}
+    incoming_by_j = {j: [] for j in NumEstacoes}
 
-    for i in ids:
+    for i in NumEstacoes:
         # Pega a linha da matriz de distancias
         dists_i = df_dm.loc[i]
         # Filtra dist <= MAX_FIBER_DISTANCE_KM
@@ -223,14 +223,14 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
             neighbors_by_i[i].append(j)
             incoming_by_j[j].append(i)
         
-    print(f"Iniciando modelagem ILP para {len(ids)} estações...")
+    print(f"Iniciando modelagem ILP para {len(NumEstacoes)} estações...")
     n_valid_pairs = len(valid_pairs)
     print(f"Número de pares válidos (i,j) para conexão: {n_valid_pairs}")
 
     # --- 2. Criação do Modelo  ---
     m = ConcreteModel("ICARUS_Secundario")
 
-    m.I = Set(initialize=ids, ordered=True)
+    m.I = Set(initialize=NumEstacoes, ordered=True)
     m.A = Set(dimen=2, initialize=valid_pairs, ordered=False)
     
     #Parametros
@@ -385,7 +385,7 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
             raise RuntimeError(f"Não foi possível extrair atribuição viável para a RU {i}.")
         assignment[i] = int(chosen)
 
-    df["O-DU"] = df["id"].astype(int).map(assignment)
+    df["O-DU"] = df["NumEstacao"].astype(int).map(assignment)
     return df
 
 def stats(df, df_dm, output_filename: Path):
@@ -394,7 +394,7 @@ def stats(df, df_dm, output_filename: Path):
 
     # --- Distâncias RU->DU ---
     dist_ru_du = []
-    for ru_id, du_id in zip(df["id"].to_list(), df["O-DU"].to_list()):
+    for ru_id, du_id in zip(df["NumEstacao"].to_list(), df["O-DU"].to_list()):
         d = float(df_dm.at[ru_id, du_id])
         dist_ru_du.append(d)
 
@@ -405,7 +405,7 @@ def stats(df, df_dm, output_filename: Path):
 
     # Média/DP das distâncias RU->DU
     # Se você NÃO quiser que DUs (0 km) puxem a média para baixo, exclua ru_id==du_id:
-    dist_links = dist_ru_du[(df["id"].values != df["O-DU"].values)]  # só RU realmente “ligadas” a uma DU distinta
+    dist_links = dist_ru_du[(df["NumEstacao"].values != df["O-DU"].values)]  # só RU realmente “ligadas” a uma DU distinta
     media_dist_ru_du = float(dist_links.mean())
     dp_dist_ru_du = float(dist_links.std(ddof=1))
 
@@ -413,7 +413,7 @@ def stats(df, df_dm, output_filename: Path):
     qtde_dus = int(df["O-DU"].nunique())
 
     # --- RUs por DU ---
-    rus_por_du = df.groupby("O-DU")["id"].count().astype(int)   # inclui a própria DU
+    rus_por_du = df.groupby("O-DU")["NumEstacao"].count().astype(int)   # inclui a própria DU
     media_qtde_ru_du = float(rus_por_du.mean()) 
     dp_qtde_ru_du = float(rus_por_du.std(ddof=1)) 
 
@@ -456,7 +456,7 @@ def check_rules(df, df_dm):
     ok = True
     # Regra 1: Distância RU -> DU <= MAX_FIBER_DISTANCE_KM
     dist_violations: List[Dict[str, Any]] = []
-    ru_ids = df["id"].to_numpy()
+    ru_ids = df["NumEstacao"].to_numpy()
     du_ids = df["O-DU"].to_numpy()
 
     dm_index = pd.Index(df_dm.index)
@@ -475,11 +475,11 @@ def check_rules(df, df_dm):
         # ordena pelas maiores distâncias e limita saída
         viol_idx = viol_idx[np.argsort(dist[viol_idx])[::-1]]
         for k in viol_idx:
-            dist_violations.append({"id": ru_ids[k], "o_du": du_ids[k], "dist_km": float(dist[k])})
+            dist_violations.append({"NumEstacao": ru_ids[k], "o_du": du_ids[k], "dist_km": float(dist[k])})
             print(f"[VIOL-1] : distâncias acima do limite {MAX_FIBER_DISTANCE_KM} km "
                   f"({len(dist_violations)} violações)")
             for v in dist_violations[:10]:  # mostra só as 10 mais graves
-                print(f"  - RU {v['id']} -> DU {v['o_du']} : {v['dist_km']:.6f} km")
+                print(f"  - RU {v['NumEstacao']} -> DU {v['o_du']} : {v['dist_km']:.6f} km")
 
     # Regra 2: carga por DU
     loads = df.groupby("O-DU", as_index=True)["bandwidth"].sum()
@@ -494,7 +494,7 @@ def check_rules(df, df_dm):
 
     # Regra 3: se alguém aponta para j, então j aponta para j
     du_set = set(df["O-DU"].unique())
-    id_set = set(df["id"].unique())
+    id_set = set(df["NumEstacao"].unique())
 
     du_self_violations: List[Dict[str, Any]] = []
     for du in sorted(du_set):
@@ -502,7 +502,7 @@ def check_rules(df, df_dm):
             du_self_violations.append({"du": du, "reason": "DU não existe na coluna id", "found_o_du": None})
             continue
 
-        found = df.loc[df["id"] == du, "O-DU"].iloc[0]
+        found = df.loc[df["NumEstacao"] == du, "O-DU"].iloc[0]
         if found != du:
             du_self_violations.append({"du": du, "reason": "DU não aponta para si (cascata)", "found_o_du": found})
 
@@ -524,7 +524,7 @@ def check_rules(df, df_dm):
         over_size = over_size.sort_values(ascending=False)
 
         for du, size in over_size.items():
-            members = df.loc[df["O-DU"] == du, "id"].tolist()
+            members = df.loc[df["O-DU"] == du, "NumEstacao"].tolist()
 
             size_violations.append({
                 "du": du,
@@ -563,10 +563,10 @@ def generate_map(
     """
     tiles: str = "OpenStreetMap"
     df = df.copy()
-    df["id"] = df["id"].astype(int)
+    df["NumEstacao"] = df["NumEstacao"].astype(int)
     df["O-DU"] = df["O-DU"].astype(int) 
-    df_by_id = df.set_index("id", drop=False)
-    du_ids = set(df.loc[df["id"] == df["O-DU"], "id"])
+    df_by_id = df.set_index("NumEstacao", drop=False)
+    du_ids = set(df.loc[df["NumEstacao"] == df["O-DU"], "NumEstacao"])
 
     # Centro inicial do mapa
     center_lat = df["Lat"].mean()
@@ -588,7 +588,7 @@ def generate_map(
     # 1. Linhas RU -> DU com label de distância
     # ------------------------------------------------------------------
     for _, row in df.iterrows():
-        ru_id = row["id"]
+        ru_id = row["NumEstacao"]
         du_id = row["O-DU"]
 
         # Não desenha linha da DU para ela mesma
@@ -646,7 +646,7 @@ def generate_map(
     # 2. Marcadores de DUs e RUs
     # ------------------------------------------------------------------
     for _, row in df.iterrows():
-        station_id = row["id"]
+        station_id = row["NumEstacao"]
         lat = row["Lat"]
         lon = row["Lon"]
         bandwidth = row["bandwidth"]
@@ -756,14 +756,14 @@ def generate_csv_to_pipeline(
     delay_decimals = 0  # número de casas decimais para os delays em microssegundos
 
     # Garante ordem estável dos clusters conforme aparecem no df
-    du_ids = df.loc[df["id"] == df["O-DU"], "id"].tolist()
+    du_ids = df.loc[df["NumEstacao"] == df["O-DU"], "NumEstacao"].tolist()
 
     rows = []
 
     for du_id in du_ids:
-        du_row = df.loc[df["id"] == du_id].iloc[0]
+        du_row = df.loc[df["NumEstacao"] == du_id].iloc[0]
 
-        du_id = int(du_row["id"])
+        du_id = int(du_row["NumEstacao"])
         du_bandwidth = int(du_row["bandwidth"])
 
 
@@ -776,11 +776,11 @@ def generate_csv_to_pipeline(
 
         # RUs associadas a esta DU, exceto a própria DU
         cluster_rus = df.loc[
-            (df["O-DU"] == du_id) & (df["id"] != du_id)
+            (df["O-DU"] == du_id) & (df["NumEstacao"] != du_id)
         ]
 
         for _, ru_row in cluster_rus.iterrows():
-            ru_id = ru_row["id"]
+            ru_id = ru_row["NumEstacao"]
             ru_bandwidth = ru_row["bandwidth"]
 
             distance_km = df_dm.loc[ru_id, du_id]
@@ -805,12 +805,12 @@ if __name__ == "__main__":
 
     #Removendo colunas desnecessárias
     df.drop(columns=['N_Latitude','N_Longitude','Latitudes','Longitudes','N_Designacoes','Designacoes','N_Setores','Setores'], inplace=True)
-    df["id"] = df["id"].astype(int)
+    df["NumEstacao"] = df["NumEstacao"].astype(int)
     csv_path = OUT_DIR / f"dm_{Filename}.csv"
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"Matriz de distâncias não encontrada: {csv_path}")
-    # Carrega a Matriz de Distâncias. Define 'id' como índice para acesso rápido: dists.loc[id_origem, id_destino]
-    df_dm = pd.read_csv(csv_path, index_col='id')
+    # Carrega a Matriz de Distâncias. Define 'NumEstacao' como índice para acesso rápido: dists.loc[NumEstacao_origem, NumEstacao_destino]
+    df_dm = pd.read_csv(csv_path, index_col='NumEstacao')
     df_dm.index = df_dm.index.astype(int)
     df_dm.columns = df_dm.columns.astype(int)
 
@@ -831,12 +831,6 @@ if __name__ == "__main__":
     #checando regras do cluster foram respeitadas
     check_rules(df_cluster, df_dm)
     
-    #Gerando Mapa
-    generate_map(df_cluster, df_dm, output_filename=OUT_DIR / f"map_{Filename}_total_distance.html")
-
-    #Gerando Arquivo Texto para Pipeline
-    generate_csv_to_pipeline(df_cluster, df_dm, output_filename=OUT_DIR / f"pipeline_{Filename}_total_distance.txt")
-
     df_cluster = cluster_ilp_secundario(df, df_dm, best_du_count, objective_mode="max_load")
     output_filename = OUT_DIR / f"ilp_{Filename}_max_load.csv"
     print(f"Gravando o resultado da clusterização em {output_filename}")
@@ -852,9 +846,4 @@ if __name__ == "__main__":
     #checando regras do cluster foram respeitadas
     check_rules(df_cluster, df_dm)
     
-    #Gerando Mapa
-    generate_map(df_cluster, df_dm, output_filename=OUT_DIR / f"map_{Filename}_max_load.html")
-
-    #Gerando Arquivo Texto para Pipeline
-    generate_csv_to_pipeline(df_cluster, df_dm, output_filename=OUT_DIR / f"pipeline_{Filename}_max_load.txt")
 
