@@ -1,5 +1,5 @@
 log:
-  filename: /tmp/du__DU_ID___ru__RU_INDEX__.log
+  filename: "__RU_LOG_FILENAME__"
   level: error
 
 ru_emu:

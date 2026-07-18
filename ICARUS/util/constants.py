@@ -7,5 +7,5 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ANATEL_DATA_DIR = PROJECT_ROOT / "ANATEL"
 # Constantes físicas / de modelo
 MAX_FIBER_DISTANCE_KM: float = 9.0
-MAX_LOAD: int = 200  # Soma máxima de Frequências das bandas em MHz das RUs associadas a mesma DU
+MAX_LOAD: int = 450  # Soma máxima de Frequências das bandas em MHz das RUs associadas a mesma DU
 FIBER_DELAY_US_PER_KM: float = 5.0

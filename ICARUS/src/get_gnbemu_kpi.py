@@ -33,7 +33,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--cenario",
         required=True,
-        help="Cenário de teste para identificar o arquivo de saída. max link ou total_distance"
+        help="Cenário de teste para identificar o arquivo de saída. max link ou opex_capex"
     )
 
     parser.add_argument(

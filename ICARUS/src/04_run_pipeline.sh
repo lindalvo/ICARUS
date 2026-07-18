@@ -29,7 +29,7 @@ arquivos_nome=()
 identificadores=()
 tipos_calculo=()
 
-regex="^pipeline_([0-9]{11}_[0-9]{7})_(max_load|total_distance)\.txt$"
+regex="^pipeline_([0-9]{11}_[0-9]{7})_(cpu_power|opex_capex)\.txt$"
 
 # ==========================================
 # LOCALIZAÇÃO E VALIDAÇÃO DOS ARQUIVOS

@@ -184,13 +184,13 @@ expert_execution:
     du_ue_data_executor_queue_size: 16384
 
 log:
-  filename: /tmp/du__DU_ID__.log
+  filename: "__GNB_LOG_FILENAME__"
   all_level: error
 
 pcap:
   mac_enable: false
-  mac_filename: /tmp/du_mac.pcap
+  mac_filename: "__GNB_MAC_PCAP_FILENAME__"
   f1ap_enable: false
-  f1ap_filename: /tmp/du_f1ap.pcap
+  f1ap_filename: "__GNB_F1AP_PCAP_FILENAME__"
   f1u_enable: false
-  f1u_filename: /tmp/du_f1u.pcap
+  f1u_filename: "__GNB_F1U_PCAP_FILENAME__"

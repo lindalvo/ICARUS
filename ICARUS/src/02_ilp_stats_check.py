@@ -182,8 +182,8 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
     """
     Clusteriza RUs em DUs usando Programação Linear Inteira via Pyomo.
 
-    Objetivos Secundário:   "total_distance" -> minimiza soma total das distâncias RU-DU.
-                            "max_load"       -> minimiza a maior carga agregada atribuída a uma DU.
+    Objetivos Secundário:   "opex_capex" -> minimiza soma total das distâncias RU-DU.
+                            "cpu_power"       -> minimiza a maior carga agregada atribuída a uma DU.
 
     Restrições:
     1) Cada RU deve ser atendida por exatamente uma DU;
@@ -301,7 +301,7 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
     msg = ""
 
     #adicionar o objetivo secundário
-    if objective_mode == "total_distance":
+    if objective_mode == "opex_capex":
         msg = "Minimizando a soma total das distâncias RU-DU."
         m.Stage2OBJ = Objective(
             expr=sum(
@@ -311,19 +311,19 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
             sense=minimize
         )
 
-    elif objective_mode == "max_load":
+    elif objective_mode == "cpu_power":
         msg = "Minimizando a maior carga agregada por DU."
 
         # Lmax representa a maior carga de processamento entre todas as DUs.
         m.MaxDULoad = Var(domain=NonNegativeReals)
 
-        def max_load_rule(mm, j):
+        def cpu_power_rule(mm, j):
             return mm.MaxDULoad >= sum(
                 mm.ru_load[i] * mm.x[i, j]
                 for i in incoming_by_j[j]
             )
 
-        m.MaxLoadConstraint = Constraint(m.I, rule=max_load_rule)
+        m.MaxLoadConstraint = Constraint(m.I, rule=cpu_power_rule)
 
         m.Stage2OBJ = Objective(
             expr=m.MaxDULoad,
@@ -573,8 +573,8 @@ if __name__ == "__main__":
 
     #Executando a clusterização ILP
     best_du_count = cluster_ilp_primario(df, df_dm)
-    df_cluster = cluster_ilp_secundario(df, df_dm, best_du_count, objective_mode="total_distance")
-    output_filename = OUT_DIR / f"ilp_{Filename}_total_distance.csv"
+    df_cluster = cluster_ilp_secundario(df, df_dm, best_du_count, objective_mode="opex_capex")
+    output_filename = OUT_DIR / f"ilp_{Filename}_opex_capex.csv"
     print(f"Gravando o resultado da clusterização em {output_filename}")
     df_cluster.to_csv(output_filename, index=False)
 
@@ -583,13 +583,13 @@ if __name__ == "__main__":
     #df_cluster = pd.read_csv(output_filename)
 
     #gravando as estatísticas em um arquivo CSV
-    stats(df_cluster, df_dm, output_filename=OUT_DIR / f"stats_{Filename}_total_distance.csv")
+    stats(df_cluster, df_dm, output_filename=OUT_DIR / f"stats_{Filename}_opex_capex.csv")
 
     #checando regras do cluster foram respeitadas
     check_rules(df_cluster, df_dm)
     
-    df_cluster = cluster_ilp_secundario(df, df_dm, best_du_count, objective_mode="max_load")
-    output_filename = OUT_DIR / f"ilp_{Filename}_max_load.csv"
+    df_cluster = cluster_ilp_secundario(df, df_dm, best_du_count, objective_mode="cpu_power")
+    output_filename = OUT_DIR / f"ilp_{Filename}_cpu_power.csv"
     print(f"Gravando o resultado da clusterização em {output_filename}")
     df_cluster.to_csv(output_filename, index=False)
 
@@ -598,7 +598,7 @@ if __name__ == "__main__":
     #df_cluster = pd.read_csv(output_filename)
     
     #gravando as estatísticas em um arquivo CSV
-    stats(df_cluster, df_dm, output_filename=OUT_DIR / f"stats_{Filename}_max_load.csv")
+    stats(df_cluster, df_dm, output_filename=OUT_DIR / f"stats_{Filename}_cpu_power.csv")
 
     #checando regras do cluster foram respeitadas
     check_rules(df_cluster, df_dm)

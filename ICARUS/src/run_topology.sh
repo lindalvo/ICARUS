@@ -14,10 +14,13 @@ set -euo pipefail
 #   GNB_5RU_matriz.yml
 #
 # Formato esperado por linha:
-#   DU_ID,BW_DU,0,BW_RU1,delay_us,BW_RU2,delay_us,...
+#   DU_ID,BW_DU,0,RU1_ID,BW_RU1,delay_us,RU2_ID,BW_RU2,delay_us,...
+#
+# O primeiro trio representa a RU co-localizada com a DU:
+#   DU_ID,BW_DU,0
 #
 # Exemplo:
-#   7,20,0,20,16,20,4,20,7,20,1
+#   690458282,100,0,690458410,100,36,1015827222,50,42
 
 if [ -z "${1:-}" ]; then
     echo "Uso: $0 <nome_do_arquivo.txt> <iteracao> <cenario> <identificador>"
@@ -33,7 +36,7 @@ fi
 
 if [ -z "${2:-}" ]; then
     echo "Erro: O segundo parâmetro (iteração) é obrigatório."
-    echo "Uso: $0 <arquivo> <1-99> <max_load|total_distance> <identificador>"
+    echo "Uso: $0 <arquivo> <1-99> <cpu_power|opex_capex> <identificador>"
     exit 1
 fi
 
@@ -47,21 +50,21 @@ fi
 
 if [ -z "${3:-}" ]; then
     echo "Erro: O terceiro parâmetro (cenário) é obrigatório."
-    echo "Uso: $0 <arquivo> <1-99> <max_load|total_distance> <identificador>"
+    echo "Uso: $0 <arquivo> <1-99> <cpu_power|opex_capex> <identificador>"
     exit 1
 fi
 
 CENARIO="$3"
 
 # Verifica se o valor é exatamente uma das duas opções permitidas
-if [ "$CENARIO" != "max_load" ] && [ "$CENARIO" != "total_distance" ]; then
-    echo "Erro: O parâmetro '$CENARIO' é inválido. Escolha entre 'max_load' ou 'total_distance'."
+if [ "$CENARIO" != "cpu_power" ] && [ "$CENARIO" != "opex_capex" ]; then
+    echo "Erro: O parâmetro '$CENARIO' é inválido. Escolha entre 'cpu_power' ou 'opex_capex'."
     exit 1
 fi
 
 if [ -z "${4:-}" ]; then
     echo "Erro: O quarto parâmetro (identificador) é obrigatório."
-    echo "Uso: $0 <arquivo> <1-99> <max_load|total_distance> <identificador>"
+    echo "Uso: $0 <arquivo> <1-99> <cpu_power|opex_capex> <identificador>"
     exit 1
 fi
 
@@ -104,7 +107,7 @@ CHECK_INTERVAL=1
 LINHA_NUM=0
 METRICS_HOST=127.0.0.1
 METRICS_PORT=8001
-DELAY_BASE_DL_US=50
+DELAY_BASE_DL_US=60
 
 while IFS= read -r linha || [ -n "$linha" ]; do
     LINHA_NUM=$((LINHA_NUM + 1))
@@ -134,25 +137,29 @@ while IFS= read -r linha || [ -n "$linha" ]; do
         exit 1
     fi
 
-    if [ $(( ${#elementos[@]} % 2 )) -eq 0 ]; then
-        echo "Erro na linha $LINHA_NUM: a linha deve ter DU_ID seguido de pares BW,Delay."
+    if [ $(( ${#elementos[@]} % 3 )) -ne 0 ]; then
+        echo "Erro na linha $LINHA_NUM: os campos devem estar organizados em trios NumEstacao,BW,Delay."
         echo "Linha: $linha"
         exit 1
     fi
 
     DU_ID_RAW="$(echo "${elementos[0]}" | tr -d '[:space:]')"
 
-    DU_ID="$(awk -v v="$DU_ID_RAW" 'BEGIN {
-        if (v !~ /^[0-9]+([.][0-9]+)?$/) exit 1;
-        printf "%.0f", v;
-    }')" || {
+    if [[ ! "$DU_ID_RAW" =~ ^[0-9]{9,10}$ ]]; then
         echo "Erro na linha $LINHA_NUM: DU_ID inválido: $DU_ID_RAW"
         exit 1
-    }
+    fi
+
+    DU_ID="$DU_ID_RAW"
 
     CONFIG_DIR="../.${OUT_DIR}/${IDENTIFICADOR}/${CENARIO}/${ROUNDTRIP}/gnb_${DU_ID}"
     GNB_YAML="${CONFIG_DIR}/gnb_${DU_ID}.yml"
 	GNB_OUTPUT="${CONFIG_DIR}/gnb_${DU_ID}.out"
+    GNB_LOG="${CONFIG_DIR}/gnb_${DU_ID}.log"
+
+    GNB_MAC_PCAP="${CONFIG_DIR}/gnb_${DU_ID}_mac.pcap"
+    GNB_F1AP_PCAP="${CONFIG_DIR}/gnb_${DU_ID}_f1ap.pcap"
+    GNB_F1U_PCAP="${CONFIG_DIR}/gnb_${DU_ID}_f1u.pcap"
 
     echo "============================================================"
     echo "Linha $LINHA_NUM"
@@ -166,12 +173,12 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     mkdir -p "$CONFIG_DIR"
     echo ""
 
-    echo "Limpando processos Zumbis"
+    echo "Limpando processos Zumbis de GNB"
     for pid in $(pgrep -f 'gnb'); do
        echo "Encerrando PID GNB : $pid"
        kill -9 "$pid" 2>/dev/null || true
     done
-    echo "Limpando processos Zumbis"
+    echo "Limpando processos Zumbis de RUE_mulators"
 
     for pid in $(pgrep -f 'ru_emulator'); do
        echo "Encerrando PID RU_EMULATOR : $pid"
@@ -270,7 +277,7 @@ while IFS= read -r linha || [ -n "$linha" ]; do
 
     CONT=0
 
-    for ((i=1; i<${#elementos[@]}; i+=2)); do
+    for ((i=0; i<${#elementos[@]}; i+=3)); do
         CONT=$((CONT + 1))
 
         if [ "$CONT" -gt "$MAX_RUS" ]; then
@@ -278,8 +285,16 @@ while IFS= read -r linha || [ -n "$linha" ]; do
             exit 1
         fi
 
-        RU_BW_RAW="$(echo "${elementos[i]}" | tr -d '[:space:]')"
-        DELAY_RAW="$(echo "${elementos[i+1]}" | tr -d '[:space:]')"
+        RU_ID_RAW="$(echo "${elementos[i]}" | tr -d '[:space:]')"
+        RU_BW_RAW="$(echo "${elementos[i+1]}" | tr -d '[:space:]')"
+        DELAY_RAW="$(echo "${elementos[i+2]}" | tr -d '[:space:]')"
+
+        if [[ ! "$RU_ID_RAW" =~ ^[0-9]{9,10}$ ]]; then
+            echo "Erro na linha $LINHA_NUM: NumEstacao inválida na RU $CONT: $RU_ID_RAW"
+            exit 1
+        fi
+
+        RU_ID="$RU_ID_RAW"
 
         if [ -z "$RU_BW_RAW" ]; then
             echo "Erro na linha $LINHA_NUM: largura de banda vazia na RU $CONT."
@@ -315,8 +330,8 @@ while IFS= read -r linha || [ -n "$linha" ]; do
         PRACH_PORT_ID=$((CONT + 9))
 
         RU_INDEX="$CONT"
-        RU_ID="du${DU_ID}_ru${RU_INDEX}"
         RU_YAML="${CONFIG_DIR}/ru${RU_INDEX}.yml"
+        RU_LOG="${CONFIG_DIR}/ru${RU_INDEX}_${RU_ID}.log"
 
         if [ "$CONT" -eq 1 ]; then
             DU_IF1="$DU_IF"
@@ -367,6 +382,7 @@ while IFS= read -r linha || [ -n "$linha" ]; do
 
         echo "------------------------------------------------------------"
         echo "RU: $CONT"
+        echo "NumEstacao RU: $RU_ID"
         echo "Namespace RU: $NS"
         echo "Interface GNB/DU: $DU_IF"
         echo "Interface RU: $RU_IF"
@@ -378,6 +394,7 @@ while IFS= read -r linha || [ -n "$linha" ]; do
         echo "UL_PORT_ID: $UL_PORT_ID"
         echo "PRACH_PORT_ID: $PRACH_PORT_ID"
         echo "Arquivo YAML RU: $RU_YAML"
+        echo "Arquivo de log RU: $RU_LOG"
         echo "------------------------------------------------------------"
 
         echo "+ ip netns add $NS"
@@ -441,9 +458,7 @@ while IFS= read -r linha || [ -n "$linha" ]; do
         echo "+ sed ... $RU_MATRIZ > $RU_YAML"
 
         sed \
-            -e "s|__DU_ID__|${DU_ID}|g" \
-            -e "s|__RU_INDEX__|${RU_INDEX}|g" \
-            -e "s|__RU_ID__|${RU_ID}|g" \
+            -e "s|__RU_LOG_FILENAME__|${RU_LOG}|g" \
             -e "s|__RU_BANDWIDTH_MHZ__|${RU_BW_RAW}|g" \
             -e "s|__RU_IF__|${RU_IF}|g" \
             -e "s|__RU_MAC__|${RU_MAC}|g" \
@@ -454,6 +469,7 @@ while IFS= read -r linha || [ -n "$linha" ]; do
             "$RU_MATRIZ" > "$RU_YAML"
 
         echo "YAML gerado: $RU_YAML"
+        echo "Log configurado: $RU_LOG"
         echo ""
     done
 
@@ -495,11 +511,19 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     echo "Quantidade de RUs atendidas: $CONT"
     echo "Matriz GNB selecionada: $GNB_MATRIZ"
     echo "Arquivo YAML GNB: $GNB_YAML"
+    echo "Saída padrão da GNB: $GNB_OUTPUT"
+    echo "Arquivo de log da GNB: $GNB_LOG"
+    echo "PCAP MAC da GNB: $GNB_MAC_PCAP"
+    echo "PCAP F1AP da GNB: $GNB_F1AP_PCAP"
+    echo "PCAP F1-U da GNB: $GNB_F1U_PCAP"    
     echo "+ sed ... $GNB_MATRIZ > $GNB_YAML"
     echo ""
 
     sed \
-        -e "s|__DU_ID__|${DU_ID}|g" \
+        -e "s|__GNB_LOG_FILENAME__|${GNB_LOG}|g" \
+        -e "s|__GNB_MAC_PCAP_FILENAME__|${GNB_MAC_PCAP}|g" \
+        -e "s|__GNB_F1AP_PCAP_FILENAME__|${GNB_F1AP_PCAP}|g" \
+        -e "s|__GNB_F1U_PCAP_FILENAME__|${GNB_F1U_PCAP}|g" \
         -e "s|__DU_IF1__|${DU_IF1}|g" \
         -e "s|__DU_IF2__|${DU_IF2}|g" \
         -e "s|__DU_IF3__|${DU_IF3}|g" \

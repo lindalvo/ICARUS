@@ -207,20 +207,20 @@ if __name__ == "__main__":
     df_dm.columns = df_dm.columns.astype(int)
 
     #abrindo o arquivo resultado da clusterização RU-DU com critério Max Load
-    csv_path = OUT_DIR / f"ilp_{Filename}_max_load.csv"
+    csv_path = OUT_DIR / f"ilp_{Filename}_cpu_power.csv"
     print(f"Carregando o arquivo {csv_path}")
     df_cluster = pd.read_csv(csv_path)
     
     #Gerando Mapa Max Load
-    generate_map(df_cluster, df_dm, output_filename=OUT_DIR / f"map_{Filename}_max_load.html")
+    generate_map(df_cluster, df_dm, output_filename=OUT_DIR / f"map_{Filename}_cpu_power.html")
 
     #abrindo o arquivo resultado da clusterização RU-DU com critério Total Distance
-    csv_path = OUT_DIR / f"ilp_{Filename}_total_distance.csv"
+    csv_path = OUT_DIR / f"ilp_{Filename}_opex_capex.csv"
     print(f"Carregando o arquivo {csv_path}")
     df_cluster = pd.read_csv(csv_path)
 
     #Gerando Mapa Total Distance
-    generate_map(df_cluster, df_dm, output_filename=OUT_DIR / f"map_{Filename}_total_distance.html")
+    generate_map(df_cluster, df_dm, output_filename=OUT_DIR / f"map_{Filename}_opex_capex.html")
 
     
 
