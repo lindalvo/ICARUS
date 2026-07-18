@@ -108,6 +108,38 @@ LINHA_NUM=0
 METRICS_HOST=127.0.0.1
 METRICS_PORT=8001
 DELAY_BASE_DL_US=60
+TC_NETEM_LIMIT=100000
+MIN_NETEM_DELAY_US=5
+
+
+apply_netem_root() {
+    local dev="$1"
+    local delay_us="$2"
+    local direction_label="$3"
+
+    if (( delay_us >= MIN_NETEM_DELAY_US )); then
+        echo "+ tc qdisc replace dev $dev root netem delay ${delay_us}us limit ${TC_NETEM_LIMIT}  # ${direction_label}"
+        tc qdisc replace dev "$dev" root netem delay "${delay_us}us" limit "$TC_NETEM_LIMIT"
+    else
+        echo "+ tc qdisc del dev $dev root 2>/dev/null || true  # ${direction_label}: delay ${delay_us}us ignorado por ser < ${MIN_NETEM_DELAY_US}us"
+        tc qdisc del dev "$dev" root 2>/dev/null || true
+    fi
+}
+
+apply_netem_ns() {
+    local ns="$1"
+    local dev="$2"
+    local delay_us="$3"
+    local direction_label="$4"
+
+    if (( delay_us >= MIN_NETEM_DELAY_US )); then
+        echo "+ ip netns exec $ns tc qdisc replace dev $dev root netem delay ${delay_us}us limit ${TC_NETEM_LIMIT}  # ${direction_label}"
+        ip netns exec "$ns" tc qdisc replace dev "$dev" root netem delay "${delay_us}us" limit "$TC_NETEM_LIMIT"
+    else
+        echo "+ ip netns exec $ns tc qdisc del dev $dev root 2>/dev/null || true  # ${direction_label}: delay ${delay_us}us ignorado por ser < ${MIN_NETEM_DELAY_US}us"
+        ip netns exec "$ns" tc qdisc del dev "$dev" root 2>/dev/null || true
+    fi
+}
 
 while IFS= read -r linha || [ -n "$linha" ]; do
     LINHA_NUM=$((LINHA_NUM + 1))
@@ -446,12 +478,13 @@ while IFS= read -r linha || [ -n "$linha" ]; do
         ip netns exec "$NS" ip link set dev "$RU_IF" up
         
         delay_dl_us=$((DELAY_BASE_DL_US + DELAY_US))
+        delay_ul_us="$DELAY_US"
 
-        echo "+ tc qdisc replace dev $DU_IF root netem delay ${delay_dl_us}us"
-        tc qdisc replace dev "$DU_IF" root netem delay "${delay_dl_us}us"
+        echo "Delay DU->RU aplicado: ${delay_dl_us} us = base ${DELAY_BASE_DL_US} us + fibra ${DELAY_US} us"
+        echo "Delay RU->DU aplicado: ${delay_ul_us} us = fibra ${DELAY_US} us"
 
-        echo "+ ip netns exec $NS tc qdisc replace dev $RU_IF root netem delay ${DELAY_US}us"
-        ip netns exec "$NS" tc qdisc replace dev "$RU_IF" root netem delay "${DELAY_US}us"
+        apply_netem_root "$DU_IF" "$delay_dl_us" "DU->RU"
+        apply_netem_ns "$NS" "$RU_IF" "$delay_ul_us" "RU->DU"
 
         echo ""
         echo "Gerando YAML da RU $CONT..."
@@ -610,11 +643,11 @@ while IFS= read -r linha || [ -n "$linha" ]; do
         echo "+ ip netns exec $NS ip -br link show"
         ip netns exec "$NS" ip -br link show
 
-        echo "+ tc qdisc show dev $DU_IF"
-        tc qdisc show dev "$DU_IF"
+        echo "+ tc -s -d qdisc show dev $DU_IF"
+        tc -s -d qdisc show dev "$DU_IF"
 
-        echo "+ ip netns exec $NS tc qdisc show dev $RU_IF"
-        ip netns exec "$NS" tc qdisc show dev "$RU_IF"
+        echo "+ ip netns exec $NS tc -s -d qdisc show dev $RU_IF"
+        ip netns exec "$NS" tc -s -d qdisc show dev "$RU_IF"
 
         echo ""
     done

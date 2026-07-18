@@ -15,8 +15,8 @@ ru_ofh:
   t1a_min_cp_dl: 250
   t1a_max_cp_ul: 300
   t1a_min_cp_ul: 120
-  t1a_max_up: 300
-  t1a_min_up: 80
+  t1a_max_up: 400
+  t1a_min_up: 170
   ta4_max: 500
   ta4_min: 10
   is_prach_cp_enabled: false
@@ -35,7 +35,7 @@ ru_ofh:
       dl_port_id: [__RU1_DL_PORT_ID__]
       ul_port_id: [__RU1_UL_PORT_ID__]
       prach_port_id: [__RU1_PRACH_PORT_ID__]
-      enable_promiscuous: true
+      enable_promiscuous: false
       check_link_status: false
       mtu: 9000
     - network_interface: __DU_IF2__
@@ -45,7 +45,7 @@ ru_ofh:
       dl_port_id: [__RU2_DL_PORT_ID__]
       ul_port_id: [__RU2_UL_PORT_ID__]
       prach_port_id: [__RU2_PRACH_PORT_ID__]
-      enable_promiscuous: true
+      enable_promiscuous: false
       check_link_status: false
       mtu: 9000
     - network_interface: __DU_IF3__
@@ -55,7 +55,7 @@ ru_ofh:
       dl_port_id: [__RU3_DL_PORT_ID__]
       ul_port_id: [__RU3_UL_PORT_ID__]
       prach_port_id: [__RU3_PRACH_PORT_ID__]
-      enable_promiscuous: true
+      enable_promiscuous: false
       check_link_status: false
       mtu: 9000
 
@@ -116,7 +116,7 @@ remote_control:
 test_mode:
   test_ue:
     rnti: 0x44
-    nof_ues: 5
+    nof_ues: 1
     ri: 1
     cqi: 7
     pusch_active: true

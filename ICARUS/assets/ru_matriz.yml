@@ -10,7 +10,7 @@ ru_emu:
       ru_mac_addr: "__RU_MAC__"
       du_mac_addr: "__DU_MAC__"
 
-      enable_promiscuous: true
+      enable_promiscuous: false
 
       dl_port_id: [__DL_PORT_ID__]
       ul_port_id: [__UL_PORT_ID__]
@@ -23,4 +23,4 @@ ru_emu:
       t2a_max_cp_ul: 590
       t2a_min_cp_ul: 150
       t2a_max_up: 365
-      t2a_min_up: 70
+      t2a_min_up: 60
