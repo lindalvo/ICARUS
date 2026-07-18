@@ -11,12 +11,12 @@ cu_up:
 
 ru_ofh:
   ignore_ecpri_seq_id: true
-  t1a_max_cp_dl: 470
-  t1a_min_cp_dl: 250
-  t1a_max_cp_ul: 300
-  t1a_min_cp_ul: 120
-  t1a_max_up: 400
-  t1a_min_up: 170
+  t1a_max_cp_dl: 650
+  t1a_min_cp_dl: 310
+  t1a_max_cp_ul: 650
+  t1a_min_cp_ul: 210
+  t1a_max_up: 360
+  t1a_min_up: 120
   ta4_max: 500
   ta4_min: 10
   is_prach_cp_enabled: false

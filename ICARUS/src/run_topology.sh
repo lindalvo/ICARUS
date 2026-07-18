@@ -745,6 +745,29 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     echo "+ poetry run python ./get_gnbemu_kpi.py --seconds 180 --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}" 
     poetry run python ./get_gnbemu_kpi.py --seconds 90 --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}
 	DATA_FIM=$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')
+
+    echo "============================================================"
+    echo "Estatísticas qdisc após a coleta"
+    echo "============================================================"
+
+    for ((j=1; j<=CONT; j++)); do
+        NS="ru${j}"
+        DU_IF="ofh_du${j}"
+        RU_IF="ofh_ru${j}"
+
+        echo "------------------------------------------------------------"
+        echo "RU $j - qdisc após tráfego"
+        echo "------------------------------------------------------------"
+
+        echo "+ tc -s -d qdisc show dev $DU_IF"
+        tc -s -d qdisc show dev "$DU_IF"
+
+        echo "+ ip netns exec $NS tc -s -d qdisc show dev $RU_IF"
+        ip netns exec "$NS" tc -s -d qdisc show dev "$RU_IF"
+
+        echo ""
+    done
+    
     echo "Fim: $DATA_FIM" 
     echo ""
     echo ""
