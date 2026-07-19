@@ -15,8 +15,6 @@ ROUNDTRIPS=5
 # ==========================================
 DATE=$(date +"%Y%m%d%H%M")
 
-echo "+ mv ${FULL_PATH}/icarus.db ${FULL_PATH}/icarus${DATE}.db"
-mv "${FULL_PATH}/icarus.db" "${FULL_PATH}/icarus${DATE}.db" 2>/dev/null || true
 
 echo "Iniciando processamento dos arquivos em: $FULL_PATH"
 echo "--------------------------------------------------"
@@ -62,10 +60,12 @@ TOTAL_ARQUIVOS=${#arquivos_caminho[@]}
 if (( TOTAL_ARQUIVOS == 0 )); then
     echo "Nenhum arquivo válido foi encontrado em: $FULL_PATH"
     exit 0
+else 
+    echo "Total de arquivos válidos encontrados: $TOTAL_ARQUIVOS"
+    echo "Armazenando o banco de dados atual como icarus${DATE}.db"
+    echo "+ mv ${FULL_PATH}/icarus.db ${FULL_PATH}/icarus${DATE}.db"
+    mv "${FULL_PATH}/icarus.db" "${FULL_PATH}/icarus${DATE}.db" 2>/dev/null || true
 fi
-
-echo ""
-echo "Total de arquivos válidos encontrados: $TOTAL_ARQUIVOS"
 
 # ==========================================
 # LOOP PRINCIPAL

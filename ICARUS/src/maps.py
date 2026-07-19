@@ -1,226 +1,429 @@
-import csv
 import os
 from pathlib import Path
-import time
-import pandas as pd
+
+import contextily as ctx
+import geopandas as gpd
+import matplotlib.pyplot as plt
 import numpy as np
-import folium
-from typing import Any, Dict, List
-from pyomo.environ import (
-    ConcreteModel, Set, Param, Var, Binary, NonNegativeReals,
-    Objective, Constraint, minimize, value
-)
-from pyomo.opt import SolverFactory, TerminationCondition
-from ICARUS.util.constants import FIBER_DELAY_US_PER_KM, MAX_FIBER_DISTANCE_KM, MAX_LOAD
+import pandas as pd
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+from shapely import concave_hull
+from shapely.geometry import LineString, MultiPoint
+from shapely.ops import unary_union
 from dotenv import find_dotenv, load_dotenv
 
 load_dotenv(find_dotenv())
 Filename = os.environ["Filename"]
 OUT_DIR = Path(os.environ["OUT_DIR"]).resolve()
-MAX_CLUSTER_SIZE = int(os.environ["MAX_RUS"])
+BASEMAP_FILE = OUT_DIR / f"basemap_{Filename}_osm.tif"
+FIGSIZE = (7.2, 7.2)
+CONCAVE_HULL_RATIO = 0.35
+CLUSTER_BUFFER_M = 260
+AREA_BUFFER_M = 650
+MAP_PADDING = 0.055
 
-def generate_map(
-    df: pd.DataFrame,
-    df_dm: pd.DataFrame,
-    output_filename: Path
-):
-    """
-    Gera um mapa HTML da clusterização ILP RU -> O-DU.
-    """
-    tiles: str = "OpenStreetMap"
-    df = df.copy()
-    df["id"] = df["id"].astype(int)
-    df["O-DU"] = df["O-DU"].astype(int) 
-    df_by_id = df.set_index("id", drop=False)
-    du_ids = set(df.loc[df["id"] == df["O-DU"], "id"])
+def create_cluster_boundary(points):
+    """Cria o contorno do cluster, inclusive para clusters com poucos pontos."""
+    points = list(points)
 
-    # Centro inicial do mapa
-    center_lat = df["Lat"].mean()
-    center_lon = df["Lon"].mean()
+    if len(points) == 1:
+        return points[0].buffer(CLUSTER_BUFFER_M)
 
-    mapa = folium.Map(
-        location=[center_lat, center_lon],
-        zoom_start=12,
-        tiles=tiles,
-        control_scale=True,
+    if len(points) == 2:
+        return LineString(points).buffer(
+            CLUSTER_BUFFER_M,
+            cap_style="round",
+            join_style="round",
+        )
+
+    multipoint = MultiPoint(points)
+    boundary = concave_hull(
+        multipoint,
+        ratio=CONCAVE_HULL_RATIO,
+        allow_holes=False,
     )
 
-    fg_du = folium.FeatureGroup(name="DUs", show=True)
-    fg_ru = folium.FeatureGroup(name="RUs", show=True)
-    fg_links = folium.FeatureGroup(name="Conexões RU-DU", show=True)
-    fg_labels = folium.FeatureGroup(name="Labels", show=True)
+    if boundary.geom_type not in {"Polygon", "MultiPolygon"}:
+        boundary = multipoint.convex_hull
 
-    # ------------------------------------------------------------------
-    # 1. Linhas RU -> DU com label de distância
-    # ------------------------------------------------------------------
-    for _, row in df.iterrows():
-        ru_id = row["id"]
-        du_id = row["O-DU"]
+    return boundary.buffer(CLUSTER_BUFFER_M, join_style="round")
 
-        # Não desenha linha da DU para ela mesma
-        if ru_id == du_id:
-            continue
 
-        ru_lat = row["Lat"]
-        ru_lon = row["Lon"]
+def add_scale_bar(ax, bounds):
+    """Adiciona uma barra de escala simples em metros ou quilômetros."""
+    minx, miny, maxx, maxy = bounds
+    width = maxx - minx
+    height = maxy - miny
 
-        du_row = df_by_id.loc[du_id]
-        du_lat = du_row["Lat"]
-        du_lon = du_row["Lon"]
+    target = width * 0.18
+    options = np.array([100, 200, 500, 1000, 2000, 5000, 10000, 20000])
+    valid = options[options <= target]
+    length = int(valid[-1] if len(valid) else options[0])
 
-        distancia_km = float(df_dm.loc[ru_id, du_id])
+    x = minx + width * 0.06
+    y = miny + height * 0.055
+    tick = height * 0.007
 
-        # Linha RU -> DU
-        linha = folium.PolyLine(
-            locations=[
-                [ru_lat, ru_lon],
-                [du_lat, du_lon],
-            ],
-            color="blue",
-            weight=1,
-            opacity=0.65,
-            tooltip=(
-                f"RU {ru_id} → DU {du_id}<br>"
-                f"Distância: {distancia_km:.3f} km"
-            ),
+    ax.plot([x, x + length], [y, y], color="black", linewidth=1.4, zorder=20)
+    ax.plot([x, x], [y - tick, y + tick], color="black", linewidth=1.0, zorder=20)
+    ax.plot(
+        [x + length, x + length],
+        [y - tick, y + tick],
+        color="black",
+        linewidth=1.0,
+        zorder=20,
+    )
+
+    label = f"{length / 1000:g} km" if length >= 1000 else f"{length} m"
+    ax.text(
+        x + length / 2,
+        y + height * 0.013,
+        label,
+        ha="center",
+        va="bottom",
+        fontsize=7,
+    )
+
+
+def add_north_arrow(ax):
+    """Adiciona indicação discreta de norte."""
+    ax.annotate(
+        "N",
+        xy=(0.94, 0.94),
+        xytext=(0.94, 0.86),
+        xycoords="axes fraction",
+        textcoords="axes fraction",
+        ha="center",
+        va="center",
+        fontsize=9,
+        fontweight="bold",
+        arrowprops={
+            "arrowstyle": "-|>",
+            "facecolor": "black",
+            "edgecolor": "black",
+            "linewidth": 1.0,
+        },
+        zorder=30,
+    )
+
+def add_openstreetmap_basemap(ax, base_geo, metric_crs, basemap_file):
+    """
+    Adiciona uma base cartográfica do OpenStreetMap.
+
+    O arquivo GeoTIFF é baixado somente quando ainda não existe.
+    Nas execuções seguintes, o arquivo local é reutilizado.
+    """
+    basemap_file = Path(basemap_file)
+
+    if not basemap_file.exists():
+        print(f"Baixando mapa-base do OpenStreetMap para {basemap_file}")
+
+        # O contextily trabalha nativamente com tiles em Web Mercator.
+        base_web = base_geo.to_crs("EPSG:3857")
+
+        web_area = unary_union(
+            base_web.geometry.tolist()
+        ).convex_hull.buffer(AREA_BUFFER_M)
+
+        minx, miny, maxx, maxy = web_area.bounds
+
+        ctx.bounds2raster(
+            minx,
+            miny,
+            maxx,
+            maxy,
+            path=basemap_file,
+            zoom=11,
+            source=ctx.providers.OpenStreetMap.Mapnik,
         )
-        linha.add_to(fg_links)
 
-        # Label fixo da distância no ponto médio da linha
-        mid_lat = (ru_lat + du_lat) / 2
-        mid_lon = (ru_lon + du_lon) / 2
+    print(f"Carregando mapa-base local {basemap_file}")
 
-        folium.Marker(
-            location=[mid_lat, mid_lon],
-            icon=folium.DivIcon(
-                html=f"""
-                <div style="
-                    font-size: 9px;
-                    color: #003366;
-                    background-color: rgba(255, 255, 255, 0.85);
-                    border: 1px solid #003366;
-                    border-radius: 4px;
-                    padding: 2px 4px;
-                    white-space: nowrap;">
-                    {distancia_km:.2f} km
-                </div>
-                """
-            ),
-        ).add_to(fg_labels)
+    ctx.add_basemap(
+        ax,
+        crs=metric_crs,
+        source=basemap_file,
+        alpha=0.48,
+        reset_extent=True,
+        zorder=0,
+    )
 
-    # ------------------------------------------------------------------
-    # 2. Marcadores de DUs e RUs
-    # ------------------------------------------------------------------
-    for _, row in df.iterrows():
-        station_id = row["id"]
-        lat = row["Lat"]
-        lon = row["Lon"]
-        bandwidth = row["bandwidth"]
-        assigned_du = row["O-DU"]
+def generate_map(base, clusters, output):
+    """
+    Gera um mapa PDF de um cenário.
 
-        is_du = station_id == assigned_du
+    Parameters
+    ----------
+    base : pandas.DataFrame
+        Base comum com NumEstacao, Lat e Lon.
+    clusters : pandas.DataFrame
+        Resultado ILP com NumEstacao, Lat, Lon e O-DU.
+    output : pathlib.Path
+        Caminho do PDF de saída.
+    """
+    output = Path(output)
 
-        popup_html = f"""
-        <b>Estação:</b> {station_id}<br>
-        <b>Tipo:</b> {"DU" if is_du else "RU"}<br>
-        <b>Bandwidth:</b> {bandwidth} MHz<br>
-        <b>O-DU associada:</b> {assigned_du}
-        """
+    base = base.copy()
+    clusters = clusters.copy()
 
-        if is_du:
-            marker = folium.Marker(
-                location=[lat, lon],
-                tooltip=f"DU {station_id} | BW: {bandwidth} MHz",
-                popup=folium.Popup(popup_html, max_width=300),
-                icon=folium.Icon(
-                    color="red",
-                    icon="server",
-                    prefix="fa",
-                ),
+    base["NumEstacao"] = base["NumEstacao"].astype("int64")
+    clusters["NumEstacao"] = clusters["NumEstacao"].astype("int64")
+    clusters["O-DU"] = clusters["O-DU"].astype("int64")
+
+    base_geo = gpd.GeoDataFrame(
+        base,
+        geometry=gpd.points_from_xy(base["Lon"], base["Lat"]),
+        crs="EPSG:4326",
+    )
+
+    metric_crs = base_geo.estimate_utm_crs()
+    base_geo = base_geo.to_crs(metric_crs)
+
+    clusters_geo = gpd.GeoDataFrame(
+        clusters,
+        geometry=gpd.points_from_xy(clusters["Lon"], clusters["Lat"]),
+        crs="EPSG:4326",
+    ).to_crs(metric_crs)
+
+    # O enquadramento é calculado exclusivamente pela base comum.
+    area = unary_union(base_geo.geometry.tolist()).convex_hull.buffer(
+        AREA_BUFFER_M,
+        join_style="round",
+    )
+
+    minx, miny, maxx, maxy = area.bounds
+    padding = max(maxx - minx, maxy - miny) * MAP_PADDING
+    bounds = (
+        minx - padding,
+        miny - padding,
+        maxx + padding,
+        maxy + padding,
+    )
+
+    cluster_ids = sorted(clusters_geo["O-DU"].unique())
+    colors = plt.get_cmap("tab20", len(cluster_ids))
+    cluster_colors = {
+        cluster_id: colors(index)
+        for index, cluster_id in enumerate(cluster_ids)
+    }
+
+    plt.rcParams.update(
+        {
+            "font.family": "DejaVu Sans",
+            "font.size": 8,
+            "pdf.fonttype": 42,
+        }
+    )
+
+    fig, ax = plt.subplots(figsize=FIGSIZE)
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("#fafafa")
+
+    # Base cartográfica discreta: ruas e massas d'água, sem rótulos.
+    # Os mosaicos são rasterizados dentro do PDF; os clusters permanecem vetoriais.
+    ax.set_xlim(bounds[0], bounds[2])
+    ax.set_ylim(bounds[1], bounds[3])
+    add_openstreetmap_basemap(
+        ax=ax,
+        base_geo=base_geo,
+        metric_crs=metric_crs,
+        basemap_file=BASEMAP_FILE,
+    )
+
+    # Limite simplificado da área analisada.
+    gpd.GeoSeries([area], crs=metric_crs).plot(
+        ax=ax,
+        facecolor="none",
+        edgecolor="#888888",
+        linewidth=0.7,
+        linestyle=(0, (3, 2)),
+        zorder=1,
+    )
+
+    for cluster_id, group in clusters_geo.groupby("O-DU", sort=True):
+        color = cluster_colors[cluster_id]
+        boundary = create_cluster_boundary(group.geometry)
+
+        # Preenchimento e contorno do cluster.
+        gpd.GeoSeries([boundary], crs=metric_crs).plot(
+            ax=ax,
+            facecolor=color,
+            edgecolor="none",
+            alpha=0.10,
+            zorder=2,
+        )
+        gpd.GeoSeries([boundary], crs=metric_crs).boundary.plot(
+            ax=ax,
+            color=color,
+            linewidth=1.0,
+            alpha=0.90,
+            zorder=3,
+        )
+
+        du = group.loc[group["NumEstacao"] == cluster_id].iloc[0]
+        du_point = du.geometry
+
+        # Enlaces O-DU–O-RU.
+        for _, ru in group.iterrows():
+            if ru["NumEstacao"] == cluster_id:
+                continue
+
+            ax.plot(
+                [du_point.x, ru.geometry.x],
+                [du_point.y, ru.geometry.y],
+                color=color,
+                linewidth=0.55,
+                alpha=0.40,
+                zorder=4,
             )
-            marker.add_to(fg_du)
 
-            label_text = f"DU {station_id}<br>{bandwidth} MHz"
-            label_color = "#8B0000"
-            border_color = "#8B0000"
-
-        else:
-            marker = folium.Marker(
-                location=[lat, lon],
-                tooltip=f"RU {station_id} | BW: {bandwidth} MHz | DU: {assigned_du}",
-                popup=folium.Popup(popup_html, max_width=300),
-                icon=folium.Icon(
-                    color="green",
-                    icon="wifi",
-                    prefix="fa",
-                ),
+        # O-RUs.
+        rus = group.loc[group["NumEstacao"] != cluster_id]
+        if not rus.empty:
+            rus.plot(
+                ax=ax,
+                marker="o",
+                markersize=18,
+                color=color,
+                edgecolor="white",
+                linewidth=0.4,
+                zorder=6,
             )
-            marker.add_to(fg_ru)
 
-            label_text = f"RU {station_id}<br>{bandwidth} MHz"
-            label_color = "#006400"
-            border_color = "#006400"
+        # O-DU e identificador NumEstacao completo.
+        ax.scatter(
+            du_point.x,
+            du_point.y,
+            marker="s",
+            s=54,
+            facecolor=color,
+            edgecolor="black",
+            linewidth=0.8,
+            zorder=10,
+        )
+        ax.annotate(
+            str(int(cluster_id)),
+            xy=(du_point.x, du_point.y),
+            xytext=(5, 5),
+            textcoords="offset points",
+            fontsize=5.6,
+            fontweight="semibold",
+            ha="left",
+            va="bottom",
+            bbox={
+                "boxstyle": "round,pad=0.10",
+                "facecolor": "white",
+                "edgecolor": "none",
+                "alpha": 0.82,
+            },
+            zorder=12,
+        )
 
-        # Label fixo de bandwidth ao lado do marcador
-        folium.Marker(
-            location=[lat, lon],
-            icon=folium.DivIcon(
-                icon_anchor=(-8, 18),
-                html=f"""
-                <div style="
-                    font-size: 9px;
-                    color: {label_color};
-                    background-color: rgba(255, 255, 255, 0.85);
-                    border: 1px solid {border_color};
-                    border-radius: 4px;
-                    padding: 2px 4px;
-                    white-space: nowrap;">
-                    {label_text}
-                </div>
-                """
-            ),
-        ).add_to(fg_labels)
+    ax.set_xlim(bounds[0], bounds[2])
+    ax.set_ylim(bounds[1], bounds[3])
+    ax.set_aspect("equal", adjustable="box")
 
-    fg_links.add_to(mapa)
-    fg_du.add_to(mapa)
-    fg_ru.add_to(mapa)
-    fg_labels.add_to(mapa)
+    # Remove eixos e coordenadas para manter a figura limpa.
+    ax.tick_params(
+        left=False,
+        bottom=False,
+        labelleft=False,
+        labelbottom=False,
+    )
+    for spine in ax.spines.values():
+        spine.set_visible(False)
 
-    folium.LayerControl(collapsed=False).add_to(mapa)
+    legend = [
+        Line2D(
+            [0], [0],
+            marker="o",
+            linestyle="none",
+            markerfacecolor="#777777",
+            markeredgecolor="white",
+            markersize=5.5,
+            label="O-RU",
+        ),
+        Line2D(
+            [0], [0],
+            marker="s",
+            linestyle="none",
+            markerfacecolor="#777777",
+            markeredgecolor="black",
+            markersize=6.5,
+            label="O-DU",
+        ),
+        Line2D(
+            [0], [0],
+            color="#777777",
+            linewidth=0.8,
+            label="Enlace O-DU–O-RU",
+        ),
+        Patch(
+            facecolor="#bbbbbb",
+            edgecolor="#777777",
+            alpha=0.25,
+            label="Cluster",
+        ),
+        Line2D(
+            [0], [0],
+            color="#aaaaaa",
+            linewidth=0.8,
+            linestyle=(0, (3, 2)),
+            label="Área analisada",
+        ),
+    ]
 
-    # Ajusta o zoom para cobrir todas as estações
-    bounds = df[["Lat", "Lon"]].values.tolist()
-    mapa.fit_bounds(bounds)
-    print(f"Salvando mapa interativo em {output_filename}...")
-    mapa.save(output_filename)
+    ax.legend(
+        handles=legend,
+        loc="lower right",
+        frameon=True,
+        framealpha=0.92,
+        facecolor="white",
+        edgecolor="#bbbbbb",
+        fontsize=7,
+        borderpad=0.5,
+        labelspacing=0.4,
+        handlelength=2.0,
+    )
+
+    add_scale_bar(ax, bounds)
+    add_north_arrow(ax)
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(
+        output,
+        format="pdf",
+        bbox_inches="tight",
+        pad_inches=0.06,
+        facecolor="white",
+    )
+    plt.close(fig)
+
+    print(f"Mapa gerado: {output}")
 
     return True
 
 
 if __name__ == "__main__":
-    csv_path = OUT_DIR / f"dm_{Filename}.csv"
-    if not os.path.exists(csv_path):
-        raise FileNotFoundError(f"Matriz de distâncias não encontrada: {csv_path}")
-    # Carrega a Matriz de Distâncias. Define 'id' como índice para acesso rápido: dists.loc[id_origem, id_destino]
-    df_dm = pd.read_csv(csv_path, index_col='id')
-    df_dm.index = df_dm.index.astype(int)
-    df_dm.columns = df_dm.columns.astype(int)
-
-    #abrindo o arquivo resultado da clusterização RU-DU com critério Max Load
-    csv_path = OUT_DIR / f"ilp_{Filename}_cpu_power.csv"
+    #abrindo o arquivo com base de dados de RUs e DUs com informações de latitude, longitude e bandwidth
+    csv_path = OUT_DIR / f"grp_{Filename}.csv"
     print(f"Carregando o arquivo {csv_path}")
-    df_cluster = pd.read_csv(csv_path)
+    base = pd.read_csv(csv_path)
     
-    #Gerando Mapa Max Load
-    generate_map(df_cluster, df_dm, output_filename=OUT_DIR / f"map_{Filename}_cpu_power.html")
-
-    #abrindo o arquivo resultado da clusterização RU-DU com critério Total Distance
+    #abrindo o arquivo resultado da clusterização RU-DU com critério opex_capex
     csv_path = OUT_DIR / f"ilp_{Filename}_opex_capex.csv"
     print(f"Carregando o arquivo {csv_path}")
-    df_cluster = pd.read_csv(csv_path)
+    clusters = pd.read_csv(csv_path)
+    #Gerando Mapa Opex Capex
+    generate_map(base, clusters, output=OUT_DIR / f"map_{Filename}_opex_capex.pdf")
 
-    #Gerando Mapa Total Distance
-    generate_map(df_cluster, df_dm, output_filename=OUT_DIR / f"map_{Filename}_opex_capex.html")
+    #abrindo o arquivo resultado da clusterização RU-DU com critério cpu_power
+    csv_path = OUT_DIR / f"ilp_{Filename}_cpu_power.csv"
+    print(f"Carregando o arquivo {csv_path}")
+    clusters = pd.read_csv(csv_path)
+    #Gerando Mapa Cpu Power
+    generate_map(base, clusters, output=OUT_DIR / f"map_{Filename}_cpu_power.pdf")
 
     
 
