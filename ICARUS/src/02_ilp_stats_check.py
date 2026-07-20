@@ -317,65 +317,29 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
         msg = "Minimizando o desbalanceamento total da carga entre as O-DUs."
 
         total_load = float(sum(loads.values()))
-        target_load = total_load / float(best_du_count)
+        target_avg_load = total_load / float(best_du_count)
 
         print(f"Carga total: {total_load:.2f}")
-        print(f"Carga média alvo por O-DU: {target_load:.2f}")
+        print(f"Carga média alvo por O-DU: {target_avg_load:.2f}")
+        m.Dev = Var(m.I, domain=NonNegativeReals)
 
-        # Carga agregada atribuída a cada candidata a O-DU.
-        def du_load_rule(mm, j):
-            return sum(
-                mm.ru_load[i] * mm.x[i, j]
-                for i in incoming_by_j[j]
-            )
+        # Linearização do valor absoluto: Dev[j] >= |Carga Real[j] - Carga Ideal * y[j]|
+        def dev_pos_rule(mm, j):
+            load_j = sum(mm.ru_load[i] * mm.x[i, j] for i in incoming_by_j[j])
+            return mm.Dev[j] >= load_j - target_avg_load * mm.y[j]
 
-        m.DULoad = Expression(m.I, rule=du_load_rule)
+        def dev_neg_rule(mm, j):
+            load_j = sum(mm.ru_load[i] * mm.x[i, j] for i in incoming_by_j[j])
+            return mm.Dev[j] >= target_avg_load * mm.y[j] - load_j
 
-        # Desvio absoluto da carga em relação à média ideal.
-        m.LoadDeviation = Var(
-            m.I,
-            domain=NonNegativeReals,
-            bounds=(0.0, float(MAX_LOAD))
-        )
-
-        def deviation_positive_rule(mm, j):
-            return (
-                mm.LoadDeviation[j]
-                >= mm.DULoad[j] - target_load * mm.y[j]
-            )
-
-        m.DeviationPositive = Constraint(
-            m.I,
-            rule=deviation_positive_rule
-        )
-
-        def deviation_negative_rule(mm, j):
-            return (
-                mm.LoadDeviation[j]
-                >= target_load * mm.y[j] - mm.DULoad[j]
-            )
-
-        m.DeviationNegative = Constraint(
-            m.I,
-            rule=deviation_negative_rule
-        )
-
-        # Fortalecimento: candidatas não ativadas devem ter desvio zero.
-        def deviation_activation_rule(mm, j):
-            return (
-                mm.LoadDeviation[j]
-                <= float(MAX_LOAD) * mm.y[j]
-            )
-
-        m.DeviationActivation = Constraint(
-            m.I,
-            rule=deviation_activation_rule
-        )
+        m.DevPosConstraint = Constraint(m.I, rule=dev_pos_rule)
+        m.DevNegConstraint = Constraint(m.I, rule=dev_neg_rule)
 
         m.Stage2OBJ = Objective(
-            expr=sum(m.LoadDeviation[j] for j in m.I),
+            expr=sum(m.Dev[j] for j in m.I),
             sense=minimize
-        )    
+        )
+
     # Configurações do SOLVER
     TIME_LIMIT_SEC = int(n_valid_pairs * 16)
     SOLVER = 'cbc'  # 'cbc', 'glpk', 'gurobi', 'cplex'
