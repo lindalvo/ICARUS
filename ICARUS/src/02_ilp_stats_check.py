@@ -387,7 +387,10 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
 
     opt = SolverFactory(SOLVER)
     opt.options.clear()
-    opt.options["ratio"] = 0.0001
+    if objective_mode == "cpu_power":
+        opt.options["ratio"] = 0.015 
+    else:
+        opt.options["ratio"] = 0.0001
     opt.options["threads"] = int(THREADS)
     match SOLVER:
         case "cbc":
