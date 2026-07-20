@@ -40,7 +40,7 @@ for arquivo_caminho in "$FULL_PATH"/pipeline_*.txt; do
 
     if [[ "$arquivo_nome" =~ $regex ]]; then
         IDENTIFICADOR="${BASH_REMATCH[1]}"
-        TIPO_CALCULO="${BASH_REMATCH[2]}"
+        TIPO_CALCULO="${BASH_REMATCH[3]}"
 
         arquivos_caminho+=("$arquivo_caminho")
         arquivos_nome+=("$arquivo_nome")
