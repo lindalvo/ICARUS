@@ -357,7 +357,7 @@ def generate_map(base, clusters, output):
             [0], [0],
             color="#777777",
             linewidth=0.8,
-            label="Enlace O-DU–O-RU",
+            label="Network Link O-DU<–>O-RU",
         ),
         Patch(
             facecolor="#bbbbbb",
@@ -370,7 +370,7 @@ def generate_map(base, clusters, output):
             color="#aaaaaa",
             linewidth=0.8,
             linestyle=(0, (3, 2)),
-            label="Área analisada",
+            label="Area analyzed",
         ),
     ]
 
