@@ -2,12 +2,12 @@ import csv
 import os
 from pathlib import Path
 import pandas as pd
-from ICARUS.util.constants import FIBER_DELAY_US_PER_KM
 from dotenv import find_dotenv, load_dotenv
 
 load_dotenv(find_dotenv())
 Filename = os.environ["Filename"]
 OUT_DIR = Path(os.environ["OUT_DIR"]).resolve()
+FIBER_DELAY_US_PER_KM = float(os.environ["FIBER_DELAY_US_PER_KM"])
 
 def generate_csv_to_pipeline(
     df: pd.DataFrame,

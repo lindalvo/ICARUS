@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 import pandas as pd
 import chardet
-from ICARUS.util.constants import ANATEL_DATA_DIR
 from ICARUS.util.functions import designacao_para_mhz, haversine_distance
 from dotenv import find_dotenv, load_dotenv
 
@@ -12,6 +11,7 @@ ROUND_COORD_DECIMALS = 5  # ~1.1m em latitude; longitude ~1.1m*cos(lat)
 #Regras de negócio
 Filename = os.environ["Filename"]
 OUT_DIR = Path(os.environ["OUT_DIR"]).resolve()
+ANATEL_DATA_DIR = Path(os.environ["ANATEL_DATA_DIR"]).resolve()
 
 
 def main() -> int:

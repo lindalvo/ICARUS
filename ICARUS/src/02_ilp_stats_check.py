@@ -1,24 +1,24 @@
-import csv
 import os
 from pathlib import Path
 import time
 import pandas as pd
 import numpy as np
-import folium
 from typing import Any, Dict, List
 from pyomo.environ import (
     ConcreteModel, Set, Param, Var, Binary, NonNegativeReals,
-    Objective, Constraint, minimize, value
+    Objective, Constraint, Expression, minimize, value
 )
 from pyomo.opt import SolverFactory, TerminationCondition
-from ICARUS.util.constants import FIBER_DELAY_US_PER_KM, MAX_FIBER_DISTANCE_KM, MAX_LOAD
 from dotenv import find_dotenv, load_dotenv
 
 load_dotenv(find_dotenv())
 Filename = os.environ["Filename"]
 OUT_DIR = Path(os.environ["OUT_DIR"]).resolve()
 MAX_CLUSTER_SIZE = int(os.environ["MAX_RUS"])
-
+MAX_FIBER_DISTANCE_KM = float(os.environ["MAX_FIBER_DISTANCE_KM"])
+MAX_LOAD = int(os.environ["MAX_LOAD"])
+TIME_LIMIT_SOLVER = int(os.environ.get("TIME_LIMIT_SOLVER", 3200))
+MAX_SOLVER_THREADS = int(os.environ.get("MAX_SOLVER_THREADS", 32))
 def cluster_ilp_primario(df: pd.DataFrame, df_dm: pd.DataFrame):
     """
     Clusteriza RUs em DUs usando Programação Linear Inteira via Pyomo.
@@ -64,6 +64,9 @@ def cluster_ilp_primario(df: pd.DataFrame, df_dm: pd.DataFrame):
             incoming_by_j[j].append(i)
         
     print(f"Iniciando modelagem ILP para {len(NumEstacoes)} estações...")
+    print(f"Critério de distância máxima para pares RU-DU: {MAX_FIBER_DISTANCE_KM} km")
+    print(f"Critério de carga máxima por DU: {MAX_LOAD} MHz")
+    print(f"Critério de tamanho máximo de cluster: {MAX_CLUSTER_SIZE} RUs (incluindo a própria DU)")
     n_valid_pairs = len(valid_pairs)
     print(f"Número de pares válidos (i,j) para conexão: {n_valid_pairs}")
 
@@ -125,7 +128,7 @@ def cluster_ilp_primario(df: pd.DataFrame, df_dm: pd.DataFrame):
 
     m.SelfAssignment = Constraint(m.I, rule=self_assignment_rule)
 
-    # 5) Cada cluster pode ter no máximo 5 elementos, incluindo a própria DU.
+    # 5) Cada cluster pode ter no máximo MAX_CLUSTER_SIZE elementos, incluindo a própria DU.
     def max_cluster_size_rule(mm, j):
         return (
             sum(mm.x[i, j] for i in incoming_by_j[j])
@@ -135,25 +138,24 @@ def cluster_ilp_primario(df: pd.DataFrame, df_dm: pd.DataFrame):
     m.MaxClusterSize = Constraint(m.I, rule=max_cluster_size_rule)
 
     # Configurações do SOLVER
-    TIME_LIMIT_SEC = int(n_valid_pairs * 16)
     SOLVER = 'cbc'  # 'cbc', 'glpk', 'gurobi', 'cplex'
-    MAX_SOLVER_THREADS = 16
+    MAX_SOLVER_THREADS = 32
     THREADS = min(os.cpu_count() or 4, MAX_SOLVER_THREADS)
 
     opt = SolverFactory(SOLVER)
     opt.options.clear()
-    opt.options["ratio"] = 0.0001
+    opt.options["ratio"] = 0.001
     opt.options["threads"] = int(THREADS)
     match SOLVER:
         case "cbc":
-            opt.options["seconds"] = int(TIME_LIMIT_SEC)
+            opt.options["seconds"] = int(TIME_LIMIT_SOLVER)
             opt.options["timeMode"] = "elapsed"
         case "glpk":
-            opt.options["tmlim"] = int(TIME_LIMIT_SEC)
+            opt.options["tmlim"] = int(TIME_LIMIT_SOLVER)
         case "gurobi" | "gurobi_direct" | "gurobi_persistent":
-            opt.options["TimeLimit"] = float(TIME_LIMIT_SEC)
+            opt.options["TimeLimit"] = float(TIME_LIMIT_SOLVER)
         case "cplex" | "cplex_direct" | "cplex_persistent":
-            opt.options["timelimit"] = float(TIME_LIMIT_SEC)
+            opt.options["timelimit"] = float(TIME_LIMIT_SOLVER)
             
     
     # --- Objetivo Primário - minimização do número de DUs ---
@@ -164,7 +166,7 @@ def cluster_ilp_primario(df: pd.DataFrame, df_dm: pd.DataFrame):
     )
 
     print(f"Minimizando o número de DUs com solver {SOLVER} (threads={THREADS})...")
-    print(f"Tempo limite {TIME_LIMIT_SEC} segundos)...")
+    print(f"Tempo limite {TIME_LIMIT_SOLVER} segundos)...")
     
     inicio = time.perf_counter()
     results = opt.solve(m, tee=True)
@@ -312,24 +314,68 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
         )
 
     elif objective_mode == "cpu_power":
-        msg = "Minimizando a maior carga agregada por DU."
+        msg = "Minimizando o desbalanceamento total da carga entre as O-DUs."
 
-        # Lmax representa a maior carga de processamento entre todas as DUs.
-        m.MaxDULoad = Var(domain=NonNegativeReals)
+        total_load = float(sum(loads.values()))
+        target_load = total_load / float(best_du_count)
 
-        def cpu_power_rule(mm, j):
-            return mm.MaxDULoad >= sum(
+        print(f"Carga total: {total_load:.2f}")
+        print(f"Carga média alvo por O-DU: {target_load:.2f}")
+
+        # Carga agregada atribuída a cada candidata a O-DU.
+        def du_load_rule(mm, j):
+            return sum(
                 mm.ru_load[i] * mm.x[i, j]
                 for i in incoming_by_j[j]
             )
 
-        m.MaxLoadConstraint = Constraint(m.I, rule=cpu_power_rule)
+        m.DULoad = Expression(m.I, rule=du_load_rule)
+
+        # Desvio absoluto da carga em relação à média ideal.
+        m.LoadDeviation = Var(
+            m.I,
+            domain=NonNegativeReals,
+            bounds=(0.0, float(MAX_LOAD))
+        )
+
+        def deviation_positive_rule(mm, j):
+            return (
+                mm.LoadDeviation[j]
+                >= mm.DULoad[j] - target_load * mm.y[j]
+            )
+
+        m.DeviationPositive = Constraint(
+            m.I,
+            rule=deviation_positive_rule
+        )
+
+        def deviation_negative_rule(mm, j):
+            return (
+                mm.LoadDeviation[j]
+                >= target_load * mm.y[j] - mm.DULoad[j]
+            )
+
+        m.DeviationNegative = Constraint(
+            m.I,
+            rule=deviation_negative_rule
+        )
+
+        # Fortalecimento: candidatas não ativadas devem ter desvio zero.
+        def deviation_activation_rule(mm, j):
+            return (
+                mm.LoadDeviation[j]
+                <= float(MAX_LOAD) * mm.y[j]
+            )
+
+        m.DeviationActivation = Constraint(
+            m.I,
+            rule=deviation_activation_rule
+        )
 
         m.Stage2OBJ = Objective(
-            expr=m.MaxDULoad,
-            sense=minimize,
-        )
-    
+            expr=sum(m.LoadDeviation[j] for j in m.I),
+            sense=minimize
+        )    
     # Configurações do SOLVER
     TIME_LIMIT_SEC = int(n_valid_pairs * 16)
     SOLVER = 'cbc'  # 'cbc', 'glpk', 'gurobi', 'cplex'
