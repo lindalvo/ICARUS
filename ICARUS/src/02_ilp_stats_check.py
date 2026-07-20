@@ -336,36 +336,38 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
         m.DevNegConstraint = Constraint(m.I, rule=dev_neg_rule)
 
         m.Stage2OBJ = Objective(
-            expr=sum(m.Dev[j] for j in m.I),
+            expr=sum(m.Dev[j] for j in m.I) + 0.001 * sum(m.dist[i, j] * m.x[i, j] for (i, j) in m.A),
             sense=minimize
         )
 
     # Configurações do SOLVER
-    TIME_LIMIT_SEC = int(n_valid_pairs * 16)
     SOLVER = 'cbc'  # 'cbc', 'glpk', 'gurobi', 'cplex'
-    MAX_SOLVER_THREADS = 16
+    MAX_SOLVER_THREADS = 32
     THREADS = min(os.cpu_count() or 4, MAX_SOLVER_THREADS)
 
     print(f"{msg} com solver {SOLVER} (threads={THREADS})...")
-    print(f"Tempo limite {TIME_LIMIT_SEC} segundos)...")
+    print(f"Tempo limite {TIME_LIMIT_SOLVER} segundos)...")
 
     opt = SolverFactory(SOLVER)
     opt.options.clear()
     if objective_mode == "cpu_power":
-        opt.options["ratio"] = 0.015 
+        opt.options["ratio"] = 0.05 
     else:
         opt.options["ratio"] = 0.0001
     opt.options["threads"] = int(THREADS)
     match SOLVER:
         case "cbc":
-            opt.options["seconds"] = int(TIME_LIMIT_SEC)
+            opt.options["seconds"] = int(TIME_LIMIT_SOLVER)
             opt.options["timeMode"] = "elapsed"
+            opt.options["heuristics"] = "on" 
+            opt.options["cuts"] = "on"
+            opt.options["preprocess"] = "on"
         case "glpk":
-            opt.options["tmlim"] = int(TIME_LIMIT_SEC)
+            opt.options["tmlim"] = int(TIME_LIMIT_SOLVER)
         case "gurobi" | "gurobi_direct" | "gurobi_persistent":
-            opt.options["TimeLimit"] = float(TIME_LIMIT_SEC)
+            opt.options["TimeLimit"] = float(TIME_LIMIT_SOLVER)
         case "cplex" | "cplex_direct" | "cplex_persistent":
-            opt.options["timelimit"] = float(TIME_LIMIT_SEC)
+            opt.options["timelimit"] = float(TIME_LIMIT_SOLVER)
                 
     
     inicio = time.perf_counter()
