@@ -146,7 +146,7 @@ if __name__ == "__main__":
                 1
             )[1]
 
-            # Exemplo: ilp_opex_capex ou grd_cpu_power
+            # Exemplo: otimizado ou adversarial
             scenario = f"{prefixo.rstrip('_')}_{cadeia}"
 
             scenario_stats = stats(

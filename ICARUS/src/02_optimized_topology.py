@@ -184,7 +184,7 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
     """
     Clusteriza RUs em DUs usando Programação Linear Inteira via Pyomo.
 
-    Objetivos Secundário:   "opex_capex" -> minimiza soma total das distâncias RU-DU.
+    Objetivos Secundário:   "otimizado" -> minimiza soma total das distâncias RU-DU.
                             "cpu_power"       -> minimiza a maior carga agregada atribuída a uma DU.
 
     Restrições:
@@ -303,7 +303,7 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
     msg = ""
 
     #adicionar o objetivo secundário
-    if objective_mode == "opex_capex":
+    if objective_mode == "otimizado":
         msg = "Minimizando a soma total das distâncias RU-DU."
         m.Stage2OBJ = Objective(
             expr=sum(
@@ -422,8 +422,8 @@ if __name__ == "__main__":
 
     #Executando a clusterização ILP
     best_du_count = cluster_ilp_primario(df, df_dm)
-    df_cluster = cluster_ilp_secundario(df, df_dm, best_du_count, objective_mode="opex_capex")
-    output_filename = OUT_DIR / f"ilp_{Filename}_opex_capex.csv"
+    df_cluster = cluster_ilp_secundario(df, df_dm, best_du_count, objective_mode="otimizado")
+    output_filename = OUT_DIR / f"ilp_{Filename}_otimizado.csv"
     print(f"Gravando o resultado da clusterização em {output_filename}")
     df_cluster.to_csv(output_filename, index=False)
 

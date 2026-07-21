@@ -282,7 +282,7 @@ def concentrate_load_greedy(
     df_dm: DataFrame da matriz de distâncias, indexado por NumEstacao.
     verbose
 
-    Retorna: associações estressadas de O-RUS/ODUs
+    Retorna: associações eadversarialadas de O-RUS/ODUs
     """
     result = df_opex.copy()
 
@@ -346,13 +346,13 @@ def concentrate_load_greedy(
 
 def main() -> None:
     #abrindo o arquivo com Associações OPEX/CAPEX feitas pelo ILP
-    csv_path = OUT_DIR / f"ilp_{Filename}_opex_capex.csv"
+    csv_path = OUT_DIR / f"ilp_{Filename}_otimizado.csv"
     print(f"Carregando o arquivo {csv_path}")
     df_opex = pd.read_csv(csv_path)
     df_opex["NumEstacao"] = df_opex["NumEstacao"].astype(int)
     df_opex["O-DU"] = df_opex["O-DU"].astype(int)
     
-    #abrindo o arquivo resultado da clusterização RU-DU com critério opex_capex
+    #abrindo o arquivo resultado da clusterização RU-DU com critério otimizado
     csv_path = OUT_DIR / f"dm_{Filename}.csv"
     print(f"Carregando o arquivo {csv_path}")
     df_dm = pd.read_csv(csv_path,index_col="NumEstacao")
@@ -365,7 +365,7 @@ def main() -> None:
     )
 
     df_result.to_csv(
-        OUT_DIR / f"grd_{Filename}_stress.csv",
+        OUT_DIR / f"grd_{Filename}_adversarial.csv",
         index=False,
     )
 
