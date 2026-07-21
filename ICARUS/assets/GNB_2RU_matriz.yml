@@ -100,7 +100,7 @@ remote_control:
 test_mode:
   test_ue:
     rnti: 0x44
-    nof_ues: 10
+    nof_ues: 8
     ri: 1
     cqi: 7
     pusch_active: true
