@@ -363,7 +363,7 @@ def main() -> None:
         df_opex,
         df_dm
     )
-
+    print(f"Salvando o arquivo de associações adversarialadas em {OUT_DIR / f'grd_{Filename}_adversarial.csv'}")
     df_result.to_csv(
         OUT_DIR / f"grd_{Filename}_adversarial.csv",
         index=False,
