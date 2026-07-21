@@ -410,21 +410,17 @@ if __name__ == "__main__":
     csv_path = OUT_DIR / f"grp_{Filename}.csv"
     print(f"Carregando o arquivo {csv_path}")
     base = pd.read_csv(csv_path)
-    
-    #abrindo o arquivo resultado da clusterização RU-DU com critério opex_capex
-    csv_path = OUT_DIR / f"ilp_{Filename}_opex_capex.csv"
-    print(f"Carregando o arquivo {csv_path}")
-    clusters = pd.read_csv(csv_path)
-    #Gerando Mapa Opex Capex
-    generate_map(base, clusters, output=OUT_DIR / f"map_{Filename}_opex_capex.pdf")
 
-    #abrindo o arquivo resultado da clusterização RU-DU com critério cpu_power
-    csv_path = OUT_DIR / f"ilp_{Filename}_cpu_power.csv"
-    print(f"Carregando o arquivo {csv_path}")
-    clusters = pd.read_csv(csv_path)
-    #Gerando Mapa Cpu Power
-    generate_map(base, clusters, output=OUT_DIR / f"map_{Filename}_cpu_power.pdf")
-
-    
+    #abrindo o arquivos de clusterização
+    for prefixo in ("ilp_", "grd_"):
+        padrao = f"{prefixo}{Filename}_*.csv"
+        for arquivo_csv in OUT_DIR.glob(padrao):
+            #abrindo o arquivo de  clusterização
+            csv_path = arquivo_csv
+            print(f"Carregando o arquivo {csv_path}")
+            clusters = pd.read_csv(csv_path)
+            cadeia = arquivo_csv.stem.split(f"{prefixo}{Filename}_", 1)[1]
+            #Gerando os mapas de clusterização
+            generate_map(base, clusters, output=OUT_DIR / f"map_{prefixo}{Filename}_{cadeia}.pdf")
 
 

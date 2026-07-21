@@ -106,19 +106,13 @@ if __name__ == "__main__":
     df_dm.index = df_dm.index.astype(int)
     df_dm.columns = df_dm.columns.astype(int)
 
-    #abrindo o arquivo resultado da clusterização RU-DU com critério Max Load
-    csv_path = OUT_DIR / f"ilp_{Filename}_cpu_power.csv"
-    print(f"Carregando o arquivo {csv_path}")
-    df_cluster = pd.read_csv(csv_path)
-
-    #Gerando Arquivo Texto para Pipeline Max Load
-    generate_csv_to_pipeline(df_cluster, df_dm, output_filename=OUT_DIR / f"pipeline_{Filename}_cpu_power.txt")
-
-    #abrindo o arquivo resultado da clusterização RU-DU com critério Total Distance
-    csv_path = OUT_DIR / f"ilp_{Filename}_opex_capex.csv"
-    print(f"Carregando o arquivo {csv_path}")
-    df_cluster = pd.read_csv(csv_path)
-
-    #Gerando Arquivo Texto para Pipeline Total Distance
-    generate_csv_to_pipeline(df_cluster, df_dm, output_filename=OUT_DIR / f"pipeline_{Filename}_opex_capex.txt")
+    for prefixo in ("ilp_", "grd_"):
+        padrao = f"{prefixo}{Filename}_*.csv"
+        for arquivo_csv in OUT_DIR.glob(padrao):
+            #abrindo o arquivo de  clusterização
+            csv_path = arquivo_csv
+            print(f"Carregando o arquivo {csv_path}")
+            cadeia = arquivo_csv.stem.split(f"{prefixo}{Filename}_", 1)[1]
+            df_cluster = pd.read_csv(csv_path)
+            generate_csv_to_pipeline(df_cluster, df_dm, output_filename=OUT_DIR / f"pipeline_{Filename}_{cadeia}.txt")
 

@@ -36,7 +36,7 @@ fi
 
 if [ -z "${2:-}" ]; then
     echo "Erro: O segundo parâmetro (iteração) é obrigatório."
-    echo "Uso: $0 <arquivo> <1-99> <cpu_power|opex_capex> <identificador>"
+    echo "Uso: $0 <arquivo> <1-99> <cpu_power|opex_capex|stress> <identificador>"
     exit 1
 fi
 
@@ -50,21 +50,21 @@ fi
 
 if [ -z "${3:-}" ]; then
     echo "Erro: O terceiro parâmetro (cenário) é obrigatório."
-    echo "Uso: $0 <arquivo> <1-99> <cpu_power|opex_capex> <identificador>"
+    echo "Uso: $0 <arquivo> <1-99> <cpu_power|opex_capex|stress> <identificador>"
     exit 1
 fi
 
 CENARIO="$3"
 
 # Verifica se o valor é exatamente uma das duas opções permitidas
-if [ "$CENARIO" != "cpu_power" ] && [ "$CENARIO" != "opex_capex" ]; then
-    echo "Erro: O parâmetro '$CENARIO' é inválido. Escolha entre 'cpu_power' ou 'opex_capex'."
+if [ "$CENARIO" != "cpu_power" ] && [ "$CENARIO" != "opex_capex" ] && [ "$CENARIO" != "stress" ]; then
+    echo "Erro: O parâmetro '$CENARIO' é inválido. Escolha entre 'cpu_power', 'opex_capex' ou 'stress'."
     exit 1
 fi
 
 if [ -z "${4:-}" ]; then
     echo "Erro: O quarto parâmetro (identificador) é obrigatório."
-    echo "Uso: $0 <arquivo> <1-99> <cpu_power|opex_capex> <identificador>"
+    echo "Uso: $0 <arquivo> <1-99> <cpu_power|opex_capex|stress> <identificador>"
     exit 1
 fi
 
