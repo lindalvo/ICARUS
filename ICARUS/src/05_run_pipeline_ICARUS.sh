@@ -8,7 +8,7 @@ set +a
 
 FULL_PATH=$(realpath ../."$OUT_DIR")
 
-ROUNDTRIPS=30
+ROUNDTRIPS=20
 
 # ==========================================
 # ARMAZENAMENTO DAS RODADAS ANTERIORES
