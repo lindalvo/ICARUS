@@ -740,6 +740,7 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     echo "       Executando a topologia por 90 Segundos para coleta de métricas de desempenho"
     echo "============================================================"
 	DATA_INICIO=$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')
+    sleep 10
     echo ""
     echo "Inicio: $DATA_INICIO" 
     echo "+ poetry run python ./get_gnbemu_kpi.py --seconds 90 --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}" 
