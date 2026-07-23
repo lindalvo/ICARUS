@@ -5,13 +5,11 @@ ENV_FILE="${SCRIPT_DIR}/../../.env"
 set -a
 source "$ENV_FILE"
 set +a
-
+ROUNDTRIPS=${ROUNDTRIPS:-1}
 FULL_PATH=$(realpath ../."$OUT_DIR")
 
-ROUNDTRIPS=20
-
 # ==========================================
-# ARMAZENAMENTO DAS RODADAS ANTERIORES
+# ARMAZENAMENTO DAS EXECUCOES ANTERIORES
 # ==========================================
 DATE=$(date +"%Y%m%d%H%M")
 
