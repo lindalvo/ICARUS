@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import time
+import math
 import pandas as pd
 import numpy as np
 from typing import Any, Dict, List
@@ -19,6 +20,17 @@ MAX_FIBER_DISTANCE_KM = float(os.environ["MAX_FIBER_DISTANCE_KM"])
 MAX_LOAD = int(os.environ["MAX_LOAD"])
 TIME_LIMIT_SOLVER = int(os.environ.get("TIME_LIMIT_SOLVER", 3200))
 MAX_SOLVER_THREADS = int(os.environ.get("MAX_SOLVER_THREADS", 32))
+
+def aplicar_valores_iniciais(modelo, num_estacoes, valid_pairs, assignment):
+    """Define os valores iniciais de x e y para o warm start do CBC."""
+    dus = set(assignment.values())
+
+    for j in num_estacoes:
+        modelo.y[j].value = 1 if j in dus else 0
+
+    for i, j in valid_pairs:
+        modelo.x[i, j].value = (1 if assignment.get(i) == j else 0)
+
 def cluster_ilp_primario(df: pd.DataFrame, df_dm: pd.DataFrame):
     """
     Clusteriza RUs em DUs usando Programação Linear Inteira via Pyomo.
@@ -115,12 +127,6 @@ def cluster_ilp_primario(df: pd.DataFrame, df_dm: pd.DataFrame):
 
     m.Capacity = Constraint(m.I, rule=cap_rule)
 
-    # 3) Ligação lógica: se i conecta em j, então j deve ser DU.
-    def link_rule(mm, i, j):
-        return mm.x[i, j] <= mm.y[j]
-
-    m.Link = Constraint(m.A, rule=link_rule)
-
     # 4) Se j é DU, a própria RU j deve pertencer ao cluster j.
     # Isso garante que a própria DU seja contada na capacidade e na cardinalidade.
     def self_assignment_rule(mm, j):
@@ -137,14 +143,37 @@ def cluster_ilp_primario(df: pd.DataFrame, df_dm: pd.DataFrame):
 
     m.MaxClusterSize = Constraint(m.I, rule=max_cluster_size_rule)
 
+    # Limite inferior simples para o número de O-DUs.
+    lower_bound_fanout = math.ceil(
+        len(NumEstacoes) / MAX_CLUSTER_SIZE
+    )
+    lower_bound_capacity = math.ceil(
+        sum(loads.values()) / MAX_LOAD
+    )
+    lower_bound_du = max(
+        lower_bound_fanout,
+        lower_bound_capacity,
+    )
+
+    m.DULowerBound = Constraint(
+        expr=sum(m.y[j] for j in m.I) >= lower_bound_du
+    )
+
+    print(
+        "Limite inferior simples para o número de O-DUs: "
+        f"{lower_bound_du} "
+        f"(fanout={lower_bound_fanout}, "
+        f"capacidade={lower_bound_capacity})."
+    )
+
     # Configurações do SOLVER
     SOLVER = 'cbc'  # 'cbc', 'glpk', 'gurobi', 'cplex'
-    MAX_SOLVER_THREADS = 32
     THREADS = min(os.cpu_count() or 4, MAX_SOLVER_THREADS)
 
     opt = SolverFactory(SOLVER)
     opt.options.clear()
-    opt.options["ratio"] = 0.001
+    opt.options["allowableGap"] = 0.999
+    opt.options["ratioGap"] = 0.0
     opt.options["threads"] = int(THREADS)
     match SOLVER:
         case "cbc":
@@ -178,9 +207,23 @@ def cluster_ilp_primario(df: pd.DataFrame, df_dm: pd.DataFrame):
         raise RuntimeError(f"Minimização do número de DUs não provou otimalidade. TerminationCondition: {term}. Para garantir número mínimo de DUs, a primeira etapa precisa ser ótima.")
     best_du_count = int(round(sum(value(m.y[j]) for j in m.I)))
     print(f"Número mínimo de DUs encontrado: {best_du_count}")
-    return best_du_count
+    optimal_assignment = {}
+    for i in NumEstacoes:
+        chosen = None
+        for j in neighbors_by_i[i]:
+            xv = value(m.x[i, j])
+            if xv is not None and xv > 0.5:
+                chosen = int(j)
+                break
+        if chosen is None:
+            raise RuntimeError(
+                f"Não foi possível extrair a atribuição da RU {i}."
+            )
+        optimal_assignment[i] = chosen
 
-def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count: int, objective_mode: str):
+    return best_du_count, optimal_assignment
+
+def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count: int, objective_mode: str, initial_assignment: dict):
     """
     Clusteriza RUs em DUs usando Programação Linear Inteira via Pyomo.
 
@@ -274,12 +317,6 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
 
     m.Capacity = Constraint(m.I, rule=cap_rule)
 
-    # 3) Ligação lógica: se i conecta em j, então j deve ser DU.
-    def link_rule(mm, i, j):
-        return mm.x[i, j] <= mm.y[j]
-
-    m.Link = Constraint(m.A, rule=link_rule)
-
     # 4) Se j é DU, a própria RU j deve pertencer ao cluster j.
     # Isso garante que a própria DU seja contada na capacidade e na cardinalidade.
     def self_assignment_rule(mm, j):
@@ -340,9 +377,11 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
             sense=minimize
         )
 
+    if initial_assignment is not None:
+        aplicar_valores_iniciais(m,NumEstacoes,valid_pairs,initial_assignment)
+    
     # Configurações do SOLVER
     SOLVER = 'cbc'  # 'cbc', 'glpk', 'gurobi', 'cplex'
-    MAX_SOLVER_THREADS = 32
     THREADS = min(os.cpu_count() or 4, MAX_SOLVER_THREADS)
 
     print(f"{msg} com solver {SOLVER} (threads={THREADS})...")
@@ -371,7 +410,7 @@ def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count:
                 
     
     inicio = time.perf_counter()
-    results = opt.solve(m, tee=True)
+    results = opt.solve(m, tee=True,warmstart=(initial_assignment is not None))
     fim = time.perf_counter()
     print(f"Tempo de resolução segunda etapa: {fim - inicio:.2f} segundos.")
     term = results.solver.termination_condition
@@ -421,8 +460,8 @@ if __name__ == "__main__":
     df_dm.columns = df_dm.columns.astype(int)
 
     #Executando a clusterização ILP
-    best_du_count = cluster_ilp_primario(df, df_dm)
-    df_cluster = cluster_ilp_secundario(df, df_dm, best_du_count, objective_mode="otimizado")
+    best_du_count, primary_assignment = cluster_ilp_primario(df, df_dm)
+    df_cluster = cluster_ilp_secundario(df, df_dm, best_du_count, objective_mode="otimizado", initial_assignment=primary_assignment)
     output_filename = OUT_DIR / f"ilp_{Filename}_otimizado.csv"
     print(f"Gravando o resultado da clusterização em {output_filename}")
     df_cluster.to_csv(output_filename, index=False)
@@ -440,6 +479,3 @@ if __name__ == "__main__":
     #ou. se já tiver sido gerado em execução anterior, pode ser carregado diretamente:
     #print(f"Carregando clusterização de {output_filename}")
     #df_cluster = pd.read_csv(output_filename)
-    
-    
-
