@@ -1,8 +1,9 @@
 import os
 from pathlib import Path
-import pandas as pd
-import numpy as np
 from typing import Any, Dict, List
+
+import numpy as np
+import pandas as pd
 from dotenv import find_dotenv, load_dotenv
 
 
@@ -12,44 +13,60 @@ Filename = os.environ["Filename"]
 OUT_DIR = Path(os.environ["OUT_DIR"]).resolve()
 
 
-def stats(
+def add_link_distance(
     df: pd.DataFrame,
     df_dm: pd.DataFrame,
-    scenario: str
-) -> Dict[str, Any]:
+) -> pd.DataFrame:
     """
-    Calcula e retorna as estatísticas básicas de um cenário de clusterização.
+    Adiciona a distância RU -> DU de cada associação.
     """
+    result = df.copy()
+    result["NumEstacao"] = result["NumEstacao"].astype(int)
+    result["O-DU"] = result["O-DU"].astype(int)
 
-    # --- Distâncias RU -> DU ---
-    dist_ru_du = []
-
-    for ru_id, du_id in zip(
-        df["NumEstacao"].to_list(),
-        df["O-DU"].to_list()
-    ):
-        d = float(df_dm.at[ru_id, du_id])
-        dist_ru_du.append(d)
-
-    dist_ru_du = np.array(dist_ru_du, dtype=float)
-
-    # Soma das distâncias RU -> DU.
-    # As O-DUs associadas a si mesmas contribuem com distância zero.
-    total_enlace_km = float(dist_ru_du.sum())
-
-    # Considera apenas enlaces entre pontos distintos.
-    dist_links = dist_ru_du[
-        df["NumEstacao"].values != df["O-DU"].values
+    result["LinkDistanceKM"] = [
+        float(df_dm.at[ru_id, du_id])
+        for ru_id, du_id in zip(
+            result["NumEstacao"],
+            result["O-DU"],
+        )
     ]
 
-    media_dist_ru_du = float(dist_links.mean())
-    dp_dist_ru_du = float(dist_links.std(ddof=1))
+    return result
 
-    # --- Quantidade de DUs / clusters ---
+
+def stats(
+    df: pd.DataFrame,
+    scenario: str,
+) -> Dict[str, Any]:
+    """
+    Calcula e retorna as estatísticas gerais de um cenário.
+    O DataFrame deve conter a coluna LinkDistanceKM.
+    """
+    dist_ru_du = df["LinkDistanceKM"].to_numpy(dtype=float)
+
+    # As associações O-DU -> própria O-DU contribuem com distância zero.
+    total_enlace_km = float(dist_ru_du.sum())
+
+    # Exclui as associações locais para média e desvio padrão dos enlaces.
+    dist_links = df.loc[
+        df["NumEstacao"] != df["O-DU"],
+        "LinkDistanceKM",
+    ].to_numpy(dtype=float)
+
+    if len(dist_links) == 0:
+        media_dist_ru_du = 0.0
+        dp_dist_ru_du = 0.0
+    elif len(dist_links) == 1:
+        media_dist_ru_du = float(dist_links.mean())
+        dp_dist_ru_du = 0.0
+    else:
+        media_dist_ru_du = float(dist_links.mean())
+        dp_dist_ru_du = float(dist_links.std(ddof=1))
+
     qtde_dus = int(df["O-DU"].nunique())
 
-    # --- RUs por DU ---
-    # Inclui a própria O-DU no cluster.
+    # Inclui a O-RU co-localizada com a própria O-DU.
     rus_por_du = (
         df.groupby("O-DU")["NumEstacao"]
         .count()
@@ -57,9 +74,12 @@ def stats(
     )
 
     media_qtde_ru_du = float(rus_por_du.mean())
-    dp_qtde_ru_du = float(rus_por_du.std(ddof=1))
+    dp_qtde_ru_du = (
+        float(rus_por_du.std(ddof=1))
+        if len(rus_por_du) > 1
+        else 0.0
+    )
 
-    # --- Largura de banda por DU ---
     bandwidth_por_du = (
         df.groupby("O-DU")["bandwidth"]
         .sum()
@@ -67,12 +87,14 @@ def stats(
     )
 
     media_bandwidth_du = float(bandwidth_por_du.mean())
-    dp_bandwidth_du = float(bandwidth_por_du.std(ddof=1))
+    dp_bandwidth_du = (
+        float(bandwidth_por_du.std(ddof=1))
+        if len(bandwidth_por_du) > 1
+        else 0.0
+    )
 
-    # --- Quantidade total de pontos ---
     qtde_pontos = int(len(df))
 
-    # --- Impressão das estatísticas ---
     print(f"\n--- Estatísticas da Clusterização: {scenario} ---")
     print(f"Quantidade total de pontos (RUs + DUs): {qtde_pontos}")
     print(f"Quantidade de DUs (clusters): {qtde_dus}")
@@ -112,8 +134,91 @@ def stats(
     }
 
 
+def stats_by_odu(
+    df: pd.DataFrame,
+    scenario: str,
+) -> pd.DataFrame:
+    """
+    Gera as estatísticas por O-DU de um cenário.
+
+    Retorna uma linha por O-DU, contendo:
+    - quantidade de O-RUs associadas;
+    - soma das distâncias RU -> DU do cluster.
+    """
+    grouped = (
+        df.groupby("O-DU", sort=True)
+        .agg(
+            NumRUs=("NumEstacao", "count"),
+            TotalLinkDistanceKM=("LinkDistanceKM", "sum"),
+        )
+    )
+
+    grouped["NumRUs"] = grouped["NumRUs"].astype(int)
+    grouped["TotalLinkDistanceKM"] = grouped[
+        "TotalLinkDistanceKM"
+    ].astype(float)
+
+    return grouped.rename(
+        columns={
+            "NumRUs": f"{scenario}_NumRUs",
+            "TotalLinkDistanceKM": (
+                f"{scenario}_TotalLinkDistanceKM"
+            ),
+        }
+    )
+
+
+def build_stats_by_odus(
+    tables_by_scenario: Dict[str, pd.DataFrame],
+) -> pd.DataFrame:
+    """
+    Combina horizontalmente os resultados por O-DU de todos os cenários
+    e adiciona uma linha final TOTAL.
+    """
+    if not tables_by_scenario:
+        return pd.DataFrame()
+
+    scenarios = list(tables_by_scenario)
+    reference_scenario = scenarios[0]
+    reference_odus = set(tables_by_scenario[reference_scenario].index)
+
+    # Como as localizações de O-DU devem ser iguais, uma diferença é erro.
+    for scenario in scenarios[1:]:
+        current_odus = set(tables_by_scenario[scenario].index)
+
+        if current_odus != reference_odus:
+            missing = sorted(reference_odus - current_odus)
+            extra = sorted(current_odus - reference_odus)
+            raise ValueError(
+                "Os conjuntos de O-DUs não são iguais entre os cenários. "
+                f"Referência: {reference_scenario}; "
+                f"cenário divergente: {scenario}; "
+                f"ausentes: {missing}; adicionais: {extra}."
+            )
+
+    result = pd.concat(
+        [tables_by_scenario[s] for s in scenarios],
+        axis=1,
+    ).sort_index()
+
+    result.index = result.index.astype(object)
+
+    total_row: Dict[str, Any] = {}
+    for scenario in scenarios:
+        num_rus_col = f"{scenario}_NumRUs"
+        distance_col = f"{scenario}_TotalLinkDistanceKM"
+
+        total_row[num_rus_col] = int(result[num_rus_col].sum())
+        total_row[distance_col] = float(result[distance_col].sum())
+
+    result.loc["TOTAL"] = total_row
+    result.index.name = "O-DU"
+
+    return result
+
+
 if __name__ == "__main__":
-    # --- Matriz de distâncias ---
+    # A matriz é carregada apenas uma vez e reutilizada em todos os cenários.
     dm_path = OUT_DIR / f"dm_{Filename}.csv"
 
     if not dm_path.exists():
@@ -123,16 +228,16 @@ if __name__ == "__main__":
 
     df_dm = pd.read_csv(
         dm_path,
-        index_col="NumEstacao"
+        index_col="NumEstacao",
     )
 
     df_dm.index = df_dm.index.astype(int)
     df_dm.columns = df_dm.columns.astype(int)
 
-    # Cada elemento da lista será uma linha do CSV final.
     stats_rows: List[Dict[str, Any]] = []
+    odu_tables: Dict[str, pd.DataFrame] = {}
 
-    # --- Arquivos de clusterização ---
+    # Lê todos os arquivos de associação dos cenários/heurísticas.
     for prefixo in ("ilp_", "grd_"):
         padrao = f"{prefixo}{Filename}_*.csv"
 
@@ -143,24 +248,56 @@ if __name__ == "__main__":
 
             cadeia = arquivo_csv.stem.split(
                 f"{prefixo}{Filename}_",
-                1
+                1,
             )[1]
 
-            # Exemplo: otimizado ou adversarial
+            # Exemplos: ilp_otimizado e ilp_adversarial.
             scenario = f"{prefixo.rstrip('_')}_{cadeia}"
 
-            scenario_stats = stats(
+            clusters = add_link_distance(
                 df=clusters,
                 df_dm=df_dm,
-                scenario=scenario
             )
 
-            stats_rows.append(scenario_stats)
+            stats_rows.append(
+                stats(
+                    df=clusters,
+                    scenario=scenario,
+                )
+            )
 
-    # --- CSV único com todos os cenários ---
+            odu_tables[scenario] = stats_by_odu(
+                df=clusters,
+                scenario=scenario,
+            )
+
+    if not stats_rows:
+        raise FileNotFoundError(
+            "Nenhum arquivo de associações foi encontrado para os "
+            f"padrões ilp_{Filename}_*.csv ou grd_{Filename}_*.csv "
+            f"em {OUT_DIR}."
+        )
+
+    # Estatísticas gerais: uma linha por cenário.
     stats_df = pd.DataFrame(stats_rows)
+    stats_output = OUT_DIR / f"stats_{Filename}.csv"
+    stats_df.to_csv(stats_output, index=False)
 
-    output_path = OUT_DIR / f"stats_{Filename}.csv"
-    stats_df.to_csv(output_path, index=False)
+    print(f"\nEstatísticas gerais gravadas em: {stats_output}")
 
-    print(f"\nEstatísticas gravadas em: {output_path}")
+    # Estatísticas por O-DU: uma linha por O-DU e colunas por cenário.
+    stats_by_odus_df = build_stats_by_odus(odu_tables)
+    stats_by_odus_output = (
+        OUT_DIR / f"stats_by_odus_{Filename}.csv"
+    )
+
+    stats_by_odus_df.to_csv(
+        stats_by_odus_output,
+        index=True,
+        float_format="%.6f",
+    )
+
+    print(
+        "Estatísticas por O-DU gravadas em: "
+        f"{stats_by_odus_output}"
+    )

@@ -1,16 +1,28 @@
-import os
-from pathlib import Path
-import time
 import math
+import os
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
 import pandas as pd
-import numpy as np
-from typing import Any, Dict, List
+from dotenv import find_dotenv, load_dotenv
 from pyomo.environ import (
-    ConcreteModel, Set, Param, Var, Binary, NonNegativeReals,
-    Objective, Constraint, Expression, minimize, value
+    Binary,
+    ConcreteModel,
+    Constraint,
+    Expression,
+    NonNegativeReals,
+    Objective,
+    Param,
+    Set,
+    Var,
+    maximize,
+    minimize,
+    value,
 )
 from pyomo.opt import SolverFactory, TerminationCondition
-from dotenv import find_dotenv, load_dotenv
+
 
 load_dotenv(find_dotenv())
 Filename = os.environ["Filename"]
@@ -21,142 +33,282 @@ MAX_LOAD = int(os.environ["MAX_LOAD"])
 TIME_LIMIT_SOLVER = int(os.environ.get("TIME_LIMIT_SOLVER", 3200))
 MAX_SOLVER_THREADS = int(os.environ.get("MAX_SOLVER_THREADS", 32))
 
-def aplicar_valores_iniciais(modelo, num_estacoes, valid_pairs, assignment):
-    """Define os valores iniciais de x e y para o warm start do CBC."""
-    dus = set(assignment.values())
 
-    for j in num_estacoes:
-        modelo.y[j].value = 1 if j in dus else 0
+@dataclass(frozen=True)
+class DadosModeloILP:
+    """Estruturas auxiliares compartilhadas pelas duas etapas lexicográficas."""
 
-    for i, j in valid_pairs:
-        modelo.x[i, j].value = (1 if assignment.get(i) == j else 0)
+    num_estacoes: list[int]
+    loads: dict[int, float]
+    valid_pairs: list[tuple[int, int]]
+    distances: dict[tuple[int, int], float]
+    neighbors_by_i: dict[int, list[int]]
+    incoming_by_j: dict[int, list[int]]
 
-def cluster_ilp_primario(df: pd.DataFrame, df_dm: pd.DataFrame):
-    """
-    Clusteriza RUs em DUs usando Programação Linear Inteira via Pyomo.
 
-    Objetivo Primário: Minimizar o número de DUs;
+def preparar_dados_modelo(
+    df: pd.DataFrame,
+    df_dm: pd.DataFrame,
+) -> DadosModeloILP:
+    """Prepara cargas, pares RU-DU viáveis e listas de adjacência."""
+    num_estacoes = df["NumEstacao"].astype(int).tolist()
+    id_set = set(num_estacoes)
+    loads = (
+        df.assign(NumEstacao=df["NumEstacao"].astype(int))
+        .set_index("NumEstacao")["bandwidth"]
+        .astype(float)
+        .to_dict()
+    )
 
-    Restrições:
-    1) Cada RU deve ser atendida por exatamente uma DU;
-    2) Distância RU-DU <= MAX_FIBER_DISTANCE_KM;
-    3) Soma das larguras de banda por DU <= MAX_LOAD;
-    4) Cada cluster pode ter no máximo MAX_CLUSTER_SIZE elementos, incluindo a própria DU.
-    """
+    valid_pairs: list[tuple[int, int]] = []
+    distances: dict[tuple[int, int], float] = {}
+    neighbors_by_i = {i: [] for i in num_estacoes}
+    incoming_by_j = {j: [] for j in num_estacoes}
 
-    # Preparar Variáveis
-    NumEstacoes = df["NumEstacao"].astype(int).tolist()
-    id_set = set(NumEstacoes)
-    loads = df.set_index("NumEstacao")["bandwidth"].astype(float).to_dict()
+    for i in num_estacoes:
+        if i not in df_dm.index:
+            raise KeyError(f"A estação {i} não existe no índice da matriz de distâncias.")
 
-    # Pares viáveis (i,j): d(ij)) <= MAX_FIBER_DISTANCE_KM
-    valid_pairs = []
-    distances = {} # Dicionário rápido para acesso (i, j) -> dist
-    neighbors_by_i = {i: [] for i in NumEstacoes}
-    incoming_by_j = {j: [] for j in NumEstacoes}
-
-    for i in NumEstacoes:
-        # Pega a linha da matriz de distancias
         dists_i = df_dm.loc[i]
-        # Filtra dist <= MAX_FIBER_DISTANCE_KM
         valid_neighbors = [
             int(j)
             for j in dists_i[dists_i <= MAX_FIBER_DISTANCE_KM].index
             if int(j) in id_set
         ]
+
         if not valid_neighbors:
             raise ValueError(
                 f"A RU {i} não possui nenhuma DU viável dentro de "
                 f"{MAX_FIBER_DISTANCE_KM} km."
             )
+
         for j in valid_neighbors:
-            valid_pairs.append((i, j))
-            distances[(i, j)] = float(dists_i[j])
+            pair = (i, j)
+            valid_pairs.append(pair)
+            distances[pair] = float(dists_i[j])
             neighbors_by_i[i].append(j)
             incoming_by_j[j].append(i)
-        
-    print(f"Iniciando modelagem ILP para {len(NumEstacoes)} estações...")
-    print(f"Critério de distância máxima para pares RU-DU: {MAX_FIBER_DISTANCE_KM} km")
+
+    return DadosModeloILP(
+        num_estacoes=num_estacoes,
+        loads=loads,
+        valid_pairs=valid_pairs,
+        distances=distances,
+        neighbors_by_i=neighbors_by_i,
+        incoming_by_j=incoming_by_j,
+    )
+
+
+def criar_modelo_base(
+    df: pd.DataFrame,
+    df_dm: pd.DataFrame,
+    nome_modelo: str,
+) -> tuple[ConcreteModel, DadosModeloILP]:
+    """
+    Cria a parte comum dos modelos primário e secundário.
+
+    Inclui conjuntos, parâmetros, variáveis e as restrições de associação,
+    capacidade, autoassociação e cardinalidade. As restrições e os objetivos
+    específicos de cada etapa são adicionados pelas funções chamadoras.
+    """
+    dados = preparar_dados_modelo(df, df_dm)
+
+    print(f"Iniciando modelagem ILP para {len(dados.num_estacoes)} estações...")
+    print(
+        "Critério de distância máxima para pares RU-DU: "
+        f"{MAX_FIBER_DISTANCE_KM} km"
+    )
     print(f"Critério de carga máxima por DU: {MAX_LOAD} MHz")
-    print(f"Critério de tamanho máximo de cluster: {MAX_CLUSTER_SIZE} RUs (incluindo a própria DU)")
-    n_valid_pairs = len(valid_pairs)
-    print(f"Número de pares válidos (i,j) para conexão: {n_valid_pairs}")
-
-    # --- 2. Criação do Modelo  ---
-    m = ConcreteModel("ICARUS_Primario")
-
-    m.I = Set(initialize=NumEstacoes, ordered=True)
-    m.A = Set(dimen=2, initialize=valid_pairs, ordered=False)
-    
-    #Parametros
-    m.ru_load = Param(
-        m.I,
-        initialize=lambda mm, i: float(loads[i]),
-        within=NonNegativeReals,
-        mutable=False
+    print(
+        "Critério de tamanho máximo de cluster: "
+        f"{MAX_CLUSTER_SIZE} RUs (incluindo a própria DU)"
+    )
+    print(
+        "Número de pares válidos (i,j) para conexão: "
+        f"{len(dados.valid_pairs)}"
     )
 
-    m.dist = Param(
-        m.A,
-        initialize=lambda mm, i, j: float(distances[(i, j)]),
+    modelo = ConcreteModel(nome_modelo)
+
+    modelo.I = Set(initialize=dados.num_estacoes, ordered=True)
+    modelo.A = Set(dimen=2, initialize=dados.valid_pairs, ordered=False)
+
+    modelo.ru_load = Param(
+        modelo.I,
+        initialize=lambda mm, i: float(dados.loads[i]),
         within=NonNegativeReals,
-        mutable=False
+        mutable=False,
+    )
+    modelo.dist = Param(
+        modelo.A,
+        initialize=lambda mm, i, j: float(dados.distances[(i, j)]),
+        within=NonNegativeReals,
+        mutable=False,
     )
 
-    # Variáveis de Decisão
-    # y[j] = 1 se j é DU
-    m.y = Var(m.I, domain=Binary)        # 1 se j é DU
-    # x[i,j] = 1 se a RU i é atendida pela DU j
-    m.x = Var(m.A, domain=Binary)        
+    # y[j] = 1 se a estação j for ativada como O-DU.
+    modelo.y = Var(modelo.I, domain=Binary)
+    # x[i,j] = 1 se a O-RU i for atendida pela O-DU j.
+    modelo.x = Var(modelo.A, domain=Binary)
 
-    # Restrições ---
-    # 1) Cada RU i deve ser atendida por exatamente uma DU viável.
     def assign_rule(mm, i):
-        return sum(mm.x[i, j] for j in neighbors_by_i[i]) == 1
+        return sum(mm.x[i, j] for j in dados.neighbors_by_i[i]) == 1
 
-    m.Assign = Constraint(m.I, rule=assign_rule)
+    modelo.Assign = Constraint(modelo.I, rule=assign_rule)
 
-    # 2) Capacidade de banda por DU.
-    # Se y[j] = 0, ninguém pode ser atribuído a j.
-    # Se y[j] = 1, a soma das bandas atribuídas a j deve ser <= MAX_LOAD.
-    def cap_rule(mm, j):
+    def capacity_rule(mm, j):
         return (
-            sum(mm.ru_load[i] * mm.x[i, j] for i in incoming_by_j[j])
+            sum(
+                mm.ru_load[i] * mm.x[i, j]
+                for i in dados.incoming_by_j[j]
+            )
             <= float(MAX_LOAD) * mm.y[j]
         )
 
-    m.Capacity = Constraint(m.I, rule=cap_rule)
+    modelo.Capacity = Constraint(modelo.I, rule=capacity_rule)
 
-    # 4) Se j é DU, a própria RU j deve pertencer ao cluster j.
-    # Isso garante que a própria DU seja contada na capacidade e na cardinalidade.
     def self_assignment_rule(mm, j):
         return mm.x[j, j] == mm.y[j]
 
-    m.SelfAssignment = Constraint(m.I, rule=self_assignment_rule)
+    modelo.SelfAssignment = Constraint(modelo.I, rule=self_assignment_rule)
 
-    # 5) Cada cluster pode ter no máximo MAX_CLUSTER_SIZE elementos, incluindo a própria DU.
     def max_cluster_size_rule(mm, j):
         return (
-            sum(mm.x[i, j] for i in incoming_by_j[j])
+            sum(mm.x[i, j] for i in dados.incoming_by_j[j])
             <= MAX_CLUSTER_SIZE * mm.y[j]
         )
 
-    m.MaxClusterSize = Constraint(m.I, rule=max_cluster_size_rule)
+    modelo.MaxClusterSize = Constraint(
+        modelo.I,
+        rule=max_cluster_size_rule,
+    )
 
-    # Limite inferior simples para o número de O-DUs.
+    return modelo, dados
+
+
+def aplicar_valores_iniciais(
+    modelo: ConcreteModel,
+    dados: DadosModeloILP,
+    assignment: dict[int, int],
+) -> None:
+    """Define os valores iniciais de x e y para o warm start."""
+    dus = set(assignment.values())
+
+    for j in dados.num_estacoes:
+        modelo.y[j].value = 1 if j in dus else 0
+
+    for i, j in dados.valid_pairs:
+        modelo.x[i, j].value = 1 if assignment.get(i) == j else 0
+
+
+def extrair_atribuicao(
+    modelo: ConcreteModel,
+    dados: DadosModeloILP,
+) -> dict[int, int]:
+    """Extrai do modelo resolvido o mapeamento O-RU -> O-DU."""
+    assignment: dict[int, int] = {}
+
+    for i in dados.num_estacoes:
+        chosen = None
+        for j in dados.neighbors_by_i[i]:
+            x_value = value(modelo.x[i, j])
+            if x_value is not None and x_value > 0.5:
+                chosen = int(j)
+                break
+
+        if chosen is None:
+            raise RuntimeError(
+                f"Não foi possível extrair uma atribuição viável para a RU {i}."
+            )
+
+        assignment[i] = chosen
+
+    return assignment
+
+
+def criar_solver(
+    etapa: str,
+    objective_mode: Optional[str] = None,
+):
+    """
+    Cria e configura exclusivamente o Gurobi.
+
+    Na etapa primária, prioriza o fechamento do gap e utiliza gap absoluto
+    inferior a uma unidade, adequado ao objetivo inteiro de quantidade de
+    O-DUs. Na etapa secundária, mantém configuração distinta para o MILP
+    otimizado e para o MIQP não convexo adversarial.
+    """
+    threads = min(os.cpu_count() or 4, MAX_SOLVER_THREADS)
+    opt = SolverFactory("gurobi")
+
+    if not opt.available(exception_flag=False):
+        raise RuntimeError(
+            "O solver Gurobi não está disponível. Verifique a instalação, "
+            "o PATH e a licença acadêmica."
+        )
+
+    opt.options.clear()
+    opt.options["Threads"] = int(threads)
+    opt.options["TimeLimit"] = float(TIME_LIMIT_SOLVER)
+
+    if etapa == "primaria":
+        # O objetivo é inteiro. Uma diferença absoluta menor que 1 prova
+        # qual é o menor valor inteiro possível para a quantidade de O-DUs.
+        opt.options["MIPGapAbs"] = 0.999
+        opt.options["MIPGap"] = 0.0
+
+        # Prioriza a melhoria do best bound e a prova de otimalidade.
+        opt.options["MIPFocus"] = 2
+
+    elif etapa == "secundaria":
+        if objective_mode == "otimizado":
+            # MILP linear: minimização da soma das distâncias.
+            opt.options["MIPGap"] = 0.0001
+
+        elif objective_mode == "adversarial":
+            # A maximização da variância é um MIQP não convexo.
+            opt.options["NonConvex"] = 2
+            opt.options["MIPGap"] = 0.001
+
+            # Procura boas soluções incumbentes sem abandonar a prova global.
+            opt.options["MIPFocus"] = 1
+
+        else:
+            raise ValueError(
+                "objective_mode deve ser 'otimizado' ou 'adversarial'; "
+                f"recebido: {objective_mode!r}."
+            )
+    else:
+        raise ValueError(f"Etapa de solução desconhecida: {etapa!r}.")
+
+    return opt, threads
+
+
+def cluster_ilp_primario(
+    df: pd.DataFrame,
+    df_dm: pd.DataFrame,
+) -> tuple[int, dict[int, int]]:
+    """
+    Executa a primeira etapa lexicográfica.
+
+    O objetivo é encontrar e provar a menor quantidade viável de O-DUs.
+    """
+    modelo, dados = criar_modelo_base(
+        df,
+        df_dm,
+        nome_modelo="ICARUS_Primario",
+    )
+
     lower_bound_fanout = math.ceil(
-        len(NumEstacoes) / MAX_CLUSTER_SIZE
+        len(dados.num_estacoes) / MAX_CLUSTER_SIZE
     )
     lower_bound_capacity = math.ceil(
-        sum(loads.values()) / MAX_LOAD
+        sum(dados.loads.values()) / MAX_LOAD
     )
-    lower_bound_du = max(
-        lower_bound_fanout,
-        lower_bound_capacity,
-    )
+    lower_bound_du = max(lower_bound_fanout, lower_bound_capacity)
 
-    m.DULowerBound = Constraint(
-        expr=sum(m.y[j] for j in m.I) >= lower_bound_du
+    modelo.DULowerBound = Constraint(
+        expr=sum(modelo.y[j] for j in modelo.I) >= lower_bound_du
     )
 
     print(
@@ -166,316 +318,322 @@ def cluster_ilp_primario(df: pd.DataFrame, df_dm: pd.DataFrame):
         f"capacidade={lower_bound_capacity})."
     )
 
-    # Configurações do SOLVER
-    SOLVER = 'cbc'  # 'cbc', 'glpk', 'gurobi', 'cplex'
-    THREADS = min(os.cpu_count() or 4, MAX_SOLVER_THREADS)
-
-    opt = SolverFactory(SOLVER)
-    opt.options.clear()
-    opt.options["allowableGap"] = 0.999
-    opt.options["ratioGap"] = 0.0
-    opt.options["threads"] = int(THREADS)
-    match SOLVER:
-        case "cbc":
-            opt.options["seconds"] = int(TIME_LIMIT_SOLVER)
-            opt.options["timeMode"] = "elapsed"
-        case "glpk":
-            opt.options["tmlim"] = int(TIME_LIMIT_SOLVER)
-        case "gurobi" | "gurobi_direct" | "gurobi_persistent":
-            opt.options["TimeLimit"] = float(TIME_LIMIT_SOLVER)
-        case "cplex" | "cplex_direct" | "cplex_persistent":
-            opt.options["timelimit"] = float(TIME_LIMIT_SOLVER)
-            
-    
-    # --- Objetivo Primário - minimização do número de DUs ---
-    #adicionando o objetico ao modelo
-    m.Stage1OBJ = Objective(
-        expr=sum(m.y[j] for j in m.I),
+    modelo.Stage1OBJ = Objective(
+        expr=sum(modelo.y[j] for j in modelo.I),
         sense=minimize,
     )
 
-    print(f"Minimizando o número de DUs com solver {SOLVER} (threads={THREADS})...")
-    print(f"Tempo limite {TIME_LIMIT_SOLVER} segundos)...")
-    
+    opt, threads = criar_solver(etapa="primaria")
+
+    print(
+        "Minimizando o número de DUs com solver "
+        f"gurobi (threads={threads})..."
+    )
+    print(f"Tempo limite {TIME_LIMIT_SOLVER} segundos...")
+
     inicio = time.perf_counter()
-    results = opt.solve(m, tee=True)
+    results = opt.solve(modelo, tee=True)
     fim = time.perf_counter()
+
     print(f"Tempo de resolução primeira etapa: {fim - inicio:.2f} segundos.")
     term = results.solver.termination_condition
     print(f"TerminationCondition: {term}.")
-    if term != TerminationCondition.optimal:
-        raise RuntimeError(f"Minimização do número de DUs não provou otimalidade. TerminationCondition: {term}. Para garantir número mínimo de DUs, a primeira etapa precisa ser ótima.")
-    best_du_count = int(round(sum(value(m.y[j]) for j in m.I)))
-    print(f"Número mínimo de DUs encontrado: {best_du_count}")
-    optimal_assignment = {}
-    for i in NumEstacoes:
-        chosen = None
-        for j in neighbors_by_i[i]:
-            xv = value(m.x[i, j])
-            if xv is not None and xv > 0.5:
-                chosen = int(j)
-                break
-        if chosen is None:
-            raise RuntimeError(
-                f"Não foi possível extrair a atribuição da RU {i}."
-            )
-        optimal_assignment[i] = chosen
 
+    if term != TerminationCondition.optimal:
+        raise RuntimeError(
+            "A minimização do número de DUs não provou otimalidade. "
+            f"TerminationCondition: {term}. Para garantir o número mínimo "
+            "de DUs, a primeira etapa precisa ser ótima."
+        )
+
+    best_du_count = int(
+        round(sum(value(modelo.y[j]) for j in modelo.I))
+    )
+    print(f"Número mínimo de DUs encontrado: {best_du_count}")
+
+    optimal_assignment = extrair_atribuicao(modelo, dados)
     return best_du_count, optimal_assignment
 
-def cluster_ilp_secundario(df: pd.DataFrame, df_dm: pd.DataFrame, best_du_count: int, objective_mode: str, initial_assignment: dict):
+
+def cluster_ilp_secundario(
+    df: pd.DataFrame,
+    df_dm: pd.DataFrame,
+    best_du_count: int,
+    objective_mode: str,
+    initial_assignment: Optional[dict[int, int]] = None,
+) -> pd.DataFrame:
     """
-    Clusteriza RUs em DUs usando Programação Linear Inteira via Pyomo.
+    Executa a segunda etapa lexicográfica com o número de O-DUs fixado.
 
-    Objetivos Secundário:   "otimizado" -> minimiza soma total das distâncias RU-DU.
-                            "cpu_power"       -> minimiza a maior carga agregada atribuída a uma DU.
+    Modos:
+      - ``otimizado``: minimiza a soma total das distâncias O-RU--O-DU;
+      - ``adversarial``: maximiza a variância das cargas agregadas das
+        O-DUs já ativadas.
 
-    Restrições:
-    1) Cada RU deve ser atendida por exatamente uma DU;
-    2) Distância RU-DU <= MAX_FIBER_DISTANCE_KM;
-    3) Soma das larguras de banda por DU <= MAX_LOAD;
-    4) Cada cluster pode ter no máximo MAX_CLUSTER_SIZE elementos, incluindo a própria DU.
+    O cenário adversarial é um MIQP não convexo e é resolvido globalmente
+    pelo Gurobi com ``NonConvex=2``.
     """
-
-    # Preparar Variáveis
-    NumEstacoes = df["NumEstacao"].astype(int).tolist()
-    id_set = set(NumEstacoes)
-    loads = df.set_index("NumEstacao")["bandwidth"].astype(float).to_dict()
-
-    # Pares viáveis (i,j): d(ij)) <= MAX_FIBER_DISTANCE_KM
-    valid_pairs = []
-    distances = {} # Dicionário rápido para acesso (i, j) -> dist
-    neighbors_by_i = {i: [] for i in NumEstacoes}
-    incoming_by_j = {j: [] for j in NumEstacoes}
-
-    for i in NumEstacoes:
-        # Pega a linha da matriz de distancias
-        dists_i = df_dm.loc[i]
-        # Filtra dist <= MAX_FIBER_DISTANCE_KM
-        valid_neighbors = [
-            int(j)
-            for j in dists_i[dists_i <= MAX_FIBER_DISTANCE_KM].index
-            if int(j) in id_set
-        ]
-        if not valid_neighbors:
-            raise ValueError(
-                f"A RU {i} não possui nenhuma DU viável dentro de "
-                f"{MAX_FIBER_DISTANCE_KM} km."
-            )
-        for j in valid_neighbors:
-            valid_pairs.append((i, j))
-            distances[(i, j)] = float(dists_i[j])
-            neighbors_by_i[i].append(j)
-            incoming_by_j[j].append(i)
-        
-    print(f"Iniciando modelagem ILP para {len(NumEstacoes)} estações...")
-    n_valid_pairs = len(valid_pairs)
-    print(f"Número de pares válidos (i,j) para conexão: {n_valid_pairs}")
-
-    # --- 2. Criação do Modelo  ---
-    m = ConcreteModel("ICARUS_Secundario")
-
-    m.I = Set(initialize=NumEstacoes, ordered=True)
-    m.A = Set(dimen=2, initialize=valid_pairs, ordered=False)
-    
-    #Parametros
-    m.ru_load = Param(
-        m.I,
-        initialize=lambda mm, i: float(loads[i]),
-        within=NonNegativeReals,
-        mutable=False
-    )
-
-    m.dist = Param(
-        m.A,
-        initialize=lambda mm, i, j: float(distances[(i, j)]),
-        within=NonNegativeReals,
-        mutable=False
-    )
-
-    # Variáveis de Decisão
-    # y[j] = 1 se j é DU
-    m.y = Var(m.I, domain=Binary)        # 1 se j é DU
-    # x[i,j] = 1 se a RU i é atendida pela DU j
-    m.x = Var(m.A, domain=Binary)        
-
-    # Restrições ---
-    # 1) Cada RU i deve ser atendida por exatamente uma DU viável.
-    def assign_rule(mm, i):
-        return sum(mm.x[i, j] for j in neighbors_by_i[i]) == 1
-
-    m.Assign = Constraint(m.I, rule=assign_rule)
-
-    # 2) Capacidade de banda por DU.
-    # Se y[j] = 0, ninguém pode ser atribuído a j.
-    # Se y[j] = 1, a soma das bandas atribuídas a j deve ser <= MAX_LOAD.
-    def cap_rule(mm, j):
-        return (
-            sum(mm.ru_load[i] * mm.x[i, j] for i in incoming_by_j[j])
-            <= float(MAX_LOAD) * mm.y[j]
+    if best_du_count <= 0:
+        raise ValueError(
+            "best_du_count deve ser um inteiro positivo; "
+            f"recebido: {best_du_count}."
         )
 
-    m.Capacity = Constraint(m.I, rule=cap_rule)
+    modelo, dados = criar_modelo_base(
+        df,
+        df_dm,
+        nome_modelo=f"ICARUS_Secundario_{objective_mode}",
+    )
 
-    # 4) Se j é DU, a própria RU j deve pertencer ao cluster j.
-    # Isso garante que a própria DU seja contada na capacidade e na cardinalidade.
-    def self_assignment_rule(mm, j):
-        return mm.x[j, j] == mm.y[j]
-
-    m.SelfAssignment = Constraint(m.I, rule=self_assignment_rule)
-
-    # 5) Cada cluster pode ter no máximo 5 elementos, incluindo a própria DU.
-    def max_cluster_size_rule(mm, j):
-        return (
-            sum(mm.x[i, j] for i in incoming_by_j[j])
-            <= MAX_CLUSTER_SIZE * mm.y[j]
+    if best_du_count > len(dados.num_estacoes):
+        raise ValueError(
+            "best_du_count não pode exceder a quantidade de estações: "
+            f"{best_du_count} > {len(dados.num_estacoes)}."
         )
 
-    m.MaxClusterSize = Constraint(m.I, rule=max_cluster_size_rule)
-
-    #adicionado a restrição de número mínimo de DUs ao modelo encontrado no objetivo primario
-    m.FixDUCount = Constraint(
-        expr=sum(m.y[j] for j in m.I) == best_du_count
+    modelo.FixDUCount = Constraint(
+        expr=sum(modelo.y[j] for j in modelo.I) == best_du_count
     )
-    msg = ""
 
-    #adicionar o objetivo secundário
+    # Expressão compartilhada: carga agregada atendida pela candidata j.
+    def du_load_rule(mm, j):
+        return sum(
+            mm.ru_load[i] * mm.x[i, j]
+            for i in dados.incoming_by_j[j]
+        )
+
+    modelo.DULoad = Expression(modelo.I, rule=du_load_rule)
+
+    total_load = float(sum(dados.loads.values()))
+    average_active_du_load = total_load / float(best_du_count)
+
     if objective_mode == "otimizado":
         msg = "Minimizando a soma total das distâncias RU-DU."
-        m.Stage2OBJ = Objective(
+
+        modelo.Stage2OBJ = Objective(
             expr=sum(
-                m.dist[i, j] * m.x[i, j]
-                for (i, j) in m.A
+                modelo.dist[i, j] * modelo.x[i, j]
+                for i, j in modelo.A
             ),
-            sense=minimize
+            sense=minimize,
         )
 
-    elif objective_mode == "cpu_power":
-        msg = "Minimizando o desbalanceamento total da carga entre as O-DUs."
+    elif objective_mode == "adversarial":
+        optimized_dus = {int(du) for du in initial_assignment.values()}
 
-        total_load = float(sum(loads.values()))
-        target_avg_load = total_load / float(best_du_count)
+        # Mantém exatamente as mesmas localizações de O-DU do cenário otimizado.
+        def fix_optimized_dus_rule(mm, j):
+            return mm.y[j] == (1 if j in optimized_dus else 0)
 
-        print(f"Carga total: {total_load:.2f}")
-        print(f"Carga média alvo por O-DU: {target_avg_load:.2f}")
-        m.Dev = Var(m.I, domain=NonNegativeReals)
+        msg = (
+            "Maximizando a variância da carga agregada entre as "
+            "O-DUs ativadas."
+        )
 
-        # Linearização do valor absoluto: Dev[j] >= |Carga Real[j] - Carga Ideal * y[j]|
-        def dev_pos_rule(mm, j):
-            load_j = sum(mm.ru_load[i] * mm.x[i, j] for i in incoming_by_j[j])
-            return mm.Dev[j] >= load_j - target_avg_load * mm.y[j]
+        modelo.Stage2OBJ = Objective(
+            expr=sum(
+                (
+                    modelo.DULoad[j]
+                    - average_active_du_load * modelo.y[j]
+                ) ** 2
+                for j in modelo.I
+            ),
+            sense=maximize,
+        )
 
-        def dev_neg_rule(mm, j):
-            load_j = sum(mm.ru_load[i] * mm.x[i, j] for i in incoming_by_j[j])
-            return mm.Dev[j] >= target_avg_load * mm.y[j] - load_j
+        print(f"Carga total das O-RUs: {total_load:.2f} MHz")
+        print(
+            "Carga média entre as O-DUs ativadas: "
+            f"{average_active_du_load:.2f} MHz"
+        )
 
-        m.DevPosConstraint = Constraint(m.I, rule=dev_pos_rule)
-        m.DevNegConstraint = Constraint(m.I, rule=dev_neg_rule)
+        print(
+            "O-DUs fixadas pelo cenário otimizado: "
+            f"{len(optimized_dus)}"
+        )
 
-        m.Stage2OBJ = Objective(
-            expr=sum(m.Dev[j] for j in m.I) + 0.001 * sum(m.dist[i, j] * m.x[i, j] for (i, j) in m.A),
-            sense=minimize
+    else:
+        raise ValueError(
+            "objective_mode deve ser 'otimizado' ou 'adversarial'; "
+            f"recebido: {objective_mode!r}."
         )
 
     if initial_assignment is not None:
-        aplicar_valores_iniciais(m,NumEstacoes,valid_pairs,initial_assignment)
-    
-    # Configurações do SOLVER
-    SOLVER = 'cbc'  # 'cbc', 'glpk', 'gurobi', 'cplex'
-    THREADS = min(os.cpu_count() or 4, MAX_SOLVER_THREADS)
+        assignment_keys = set(initial_assignment)
+        expected_keys = set(dados.num_estacoes)
 
-    print(f"{msg} com solver {SOLVER} (threads={THREADS})...")
-    print(f"Tempo limite {TIME_LIMIT_SOLVER} segundos)...")
+        if assignment_keys != expected_keys:
+            missing = sorted(expected_keys - assignment_keys)
+            extra = sorted(assignment_keys - expected_keys)
+            raise ValueError(
+                "O initial_assignment deve conter exatamente uma atribuição "
+                "para cada O-RU. "
+                f"Ausentes: {missing[:5]}; extras: {extra[:5]}."
+            )
 
-    opt = SolverFactory(SOLVER)
-    opt.options.clear()
-    if objective_mode == "cpu_power":
-        opt.options["ratio"] = 0.05 
-    else:
-        opt.options["ratio"] = 0.0001
-    opt.options["threads"] = int(THREADS)
-    match SOLVER:
-        case "cbc":
-            opt.options["seconds"] = int(TIME_LIMIT_SOLVER)
-            opt.options["timeMode"] = "elapsed"
-            opt.options["heuristics"] = "on" 
-            opt.options["cuts"] = "on"
-            opt.options["preprocess"] = "on"
-        case "glpk":
-            opt.options["tmlim"] = int(TIME_LIMIT_SOLVER)
-        case "gurobi" | "gurobi_direct" | "gurobi_persistent":
-            opt.options["TimeLimit"] = float(TIME_LIMIT_SOLVER)
-        case "cplex" | "cplex_direct" | "cplex_persistent":
-            opt.options["timelimit"] = float(TIME_LIMIT_SOLVER)
-                
-    
+        initial_du_count = len(set(initial_assignment.values()))
+        if initial_du_count != best_du_count:
+            raise ValueError(
+                "O warm start utiliza quantidade de O-DUs diferente da "
+                "fixada na segunda etapa: "
+                f"{initial_du_count} != {best_du_count}."
+            )
+
+        for i, j in initial_assignment.items():
+            if j not in dados.neighbors_by_i[i]:
+                raise ValueError(
+                    f"Warm start inválido: a associação ({i}, {j}) "
+                    "não respeita o conjunto de pares viáveis."
+                )
+
+        aplicar_valores_iniciais(modelo, dados, initial_assignment)
+
+    opt, threads = criar_solver(
+        etapa="secundaria",
+        objective_mode=objective_mode,
+    )
+
+    print(f"{msg} com solver gurobi (threads={threads})...")
+    print(f"Tempo limite {TIME_LIMIT_SOLVER} segundos...")
+
     inicio = time.perf_counter()
-    results = opt.solve(m, tee=True,warmstart=(initial_assignment is not None))
+    results = opt.solve(
+        modelo,
+        tee=True,
+        warmstart=initial_assignment is not None,
+    )
     fim = time.perf_counter()
+
     print(f"Tempo de resolução segunda etapa: {fim - inicio:.2f} segundos.")
     term = results.solver.termination_condition
     print(f"TerminationCondition: {term}.")
 
-    # Aceita ótimo, ou interrupção por limite de tempo com incumbente
     ok_terms = {
         TerminationCondition.optimal,
         TerminationCondition.maxTimeLimit,
-        TerminationCondition.feasible
+        TerminationCondition.feasible,
     }
-
     if term not in ok_terms:
-        raise TimeoutError(f"Solver terminou em estado não aceito: {term}; descartando.")
+        raise RuntimeError(
+            f"Gurobi terminou em estado não aceito: {term}; "
+            "nenhum resultado será exportado."
+        )
 
-    assignment = {}
+    # Em maxTimeLimit, a extração também funciona como verificação de que
+    # existe um incumbente inteiro carregado no modelo.
+    assignment = extrair_atribuicao(modelo, dados)
 
-    for i in NumEstacoes:
-        chosen = None
-        for j in neighbors_by_i[i]:
-            xv = value(m.x[i, j])
-            if xv is not None and xv > 0.5:
-                chosen = j
-                break
-        if chosen is None:
-            raise RuntimeError(f"Não foi possível extrair atribuição viável para a RU {i}.")
-        assignment[i] = int(chosen)
+    active_dus = sorted(set(assignment.values()))
+    if len(active_dus) != best_du_count:
+        raise RuntimeError(
+            "A solução extraída não respeita a quantidade fixa de O-DUs: "
+            f"{len(active_dus)} != {best_du_count}."
+        )
 
-    df["O-DU"] = df["NumEstacao"].astype(int).map(assignment)
-    return df
+    if objective_mode == "adversarial":
+        du_loads = {
+            j: sum(
+                dados.loads[i]
+                for i, assigned_j in assignment.items()
+                if assigned_j == j
+            )
+            for j in active_dus
+        }
+
+        mean_load = sum(du_loads.values()) / len(du_loads)
+        variance = sum(
+            (load - mean_load) ** 2
+            for load in du_loads.values()
+        ) / len(du_loads)
+        standard_deviation = math.sqrt(variance)
+
+        print(
+            "Carga agregada das O-DUs: "
+            f"mínima={min(du_loads.values()):.2f} MHz; "
+            f"máxima={max(du_loads.values()):.2f} MHz; "
+            f"média={mean_load:.2f} MHz; "
+            f"desvio padrão={standard_deviation:.2f} MHz."
+        )
+
+    result_df = df.copy()
+    result_df["O-DU"] = (
+        result_df["NumEstacao"].astype(int).map(assignment)
+    )
+
+    if result_df["O-DU"].isna().any():
+        missing_rows = result_df.loc[
+            result_df["O-DU"].isna(),
+            "NumEstacao",
+        ].tolist()
+        raise RuntimeError(
+            "Algumas O-RUs não receberam O-DU no resultado: "
+            f"{missing_rows[:10]}."
+        )
+
+    result_df["O-DU"] = result_df["O-DU"].astype(int)
+    return result_df
+
 
 if __name__ == "__main__":
-    #abrindo o arquivo de dados de entrada (RUs + DUs) para clusterização
+    # Abre os dados de entrada das O-RUs candidatas à clusterização.
     csv_path = OUT_DIR / f"grp_{Filename}.csv"
     print(f"Carregando o arquivo {csv_path}")
     df = pd.read_csv(csv_path)
 
-    #Removendo colunas desnecessárias
-    df.drop(columns=['N_Latitude','N_Longitude','Latitudes','Longitudes','N_Designacoes','Designacoes','N_Setores','Setores'], inplace=True)
+    df.drop(
+        columns=[
+            "N_Latitude",
+            "N_Longitude",
+            "Latitudes",
+            "Longitudes",
+            "N_Designacoes",
+            "Designacoes",
+            "N_Setores",
+            "Setores",
+        ],
+        inplace=True,
+    )
     df["NumEstacao"] = df["NumEstacao"].astype(int)
+
     csv_path = OUT_DIR / f"dm_{Filename}.csv"
-    if not os.path.exists(csv_path):
-        raise FileNotFoundError(f"Matriz de distâncias não encontrada: {csv_path}")
-    # Carrega a Matriz de Distâncias. Define 'NumEstacao' como índice para acesso rápido: dists.loc[NumEstacao_origem, NumEstacao_destino]
-    df_dm = pd.read_csv(csv_path, index_col='NumEstacao')
+    if not csv_path.exists():
+        raise FileNotFoundError(
+            f"Matriz de distâncias não encontrada: {csv_path}"
+        )
+
+    df_dm = pd.read_csv(csv_path, index_col="NumEstacao")
     df_dm.index = df_dm.index.astype(int)
     df_dm.columns = df_dm.columns.astype(int)
 
-    #Executando a clusterização ILP
     best_du_count, primary_assignment = cluster_ilp_primario(df, df_dm)
-    df_cluster = cluster_ilp_secundario(df, df_dm, best_du_count, objective_mode="otimizado", initial_assignment=primary_assignment)
-    output_filename = OUT_DIR / f"ilp_{Filename}_otimizado.csv"
-    print(f"Gravando o resultado da clusterização em {output_filename}")
-    df_cluster.to_csv(output_filename, index=False)
 
-    #ou. se já tiver sido gerado em execução anterior, pode ser carregado diretamente:
-    #print(f"Carregando clusterização de {output_filename}")
-    #df_cluster = pd.read_csv(output_filename)
+    # Cenário otimizado: menor soma das distâncias RU-DU.
+    df_otimizado = cluster_ilp_secundario(
+        df,
+        df_dm,
+        best_du_count,
+        objective_mode="otimizado",
+        initial_assignment=primary_assignment,
+    )
+    optimized_output = OUT_DIR / f"ilp_{Filename}_otimizado.csv"
+    print(f"Gravando o cenário otimizado em {optimized_output}")
+    df_otimizado.to_csv(optimized_output, index=False)
 
-    #cenario desconsiderado, mas pode ser usado para balanceamento de carga entre DUs
-    #df_cluster = cluster_ilp_secundario(df, df_dm, best_du_count, objective_mode="cpu_power")
-    #output_filename = OUT_DIR / f"ilp_{Filename}_cpu_power.csv"
-    #print(f"Gravando o resultado da clusterização em {output_filename}")
-    #df_cluster.to_csv(output_filename, index=False)
-
-    #ou. se já tiver sido gerado em execução anterior, pode ser carregado diretamente:
-    #print(f"Carregando clusterização de {output_filename}")
-    #df_cluster = pd.read_csv(output_filename)
+    # Cenário adversarial maior dispersão das cargas agregadas por O-DU mantenado as posições encontradas no cenário otimizado
+    df_adversarial = cluster_ilp_secundario(
+        df,
+        df_dm,
+        best_du_count,
+        objective_mode="adversarial",
+        initial_assignment=(
+            df_otimizado.assign(
+                NumEstacao=df_otimizado["NumEstacao"].astype(int),
+                **{"O-DU": df_otimizado["O-DU"].astype(int)},
+            )
+            .set_index("NumEstacao")["O-DU"]
+            .to_dict()
+        )
+    )
+    adversarial_output = OUT_DIR / f"ilp_{Filename}_adversarial.csv"
+    print(f"Gravando o cenário adversarial em {adversarial_output}")
+    df_adversarial.to_csv(adversarial_output, index=False)
