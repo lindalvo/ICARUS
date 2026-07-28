@@ -234,7 +234,7 @@ def criar_solver(
     Na etapa primária, prioriza o fechamento do gap e utiliza gap absoluto
     inferior a uma unidade, adequado ao objetivo inteiro de quantidade de
     O-DUs. Na etapa secundária, mantém configuração distinta para o MILP
-    otimizado e para o MIQP não convexo adversarial.
+    otimizado e para maximização de desvio absoluto total adversarial.
     """
     threads = min(os.cpu_count() or 4, MAX_SOLVER_THREADS)
     opt = SolverFactory("gurobi")
@@ -264,12 +264,8 @@ def criar_solver(
             opt.options["MIPGap"] = 0.0001
 
         elif objective_mode == "adversarial":
-            # A maximização da variância é um MIQP não convexo.
-            opt.options["MIPGap"] = 0.001
-
-            # Procura boas soluções incumbentes sem abandonar a prova global.
+            opt.options["MIPGap"] = 0.05
             opt.options["MIPFocus"] = 1
-
         else:
             raise ValueError(
                 "objective_mode deve ser 'otimizado' ou 'adversarial'; "
@@ -364,11 +360,8 @@ def cluster_ilp_secundario(
 
     Modos:
       - ``otimizado``: minimiza a soma total das distâncias O-RU--O-DU;
-      - ``adversarial``: maximiza a variância das cargas agregadas das
+      - ``adversarial``: maximiza o desvio absoluto total das
         O-DUs já ativadas.
-
-    O cenário adversarial é um MIQP não convexo e é resolvido globalmente
-    pelo Gurobi com ``NonConvex=2``.
     """
     modelo, dados = criar_modelo_base(
         df,
