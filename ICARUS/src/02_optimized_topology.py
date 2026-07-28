@@ -673,20 +673,7 @@ if __name__ == "__main__":
     df_otimizado.to_csv(optimized_output, index=False)
 
     # Cenário adversarial maior dispersão das cargas agregadas por O-DU mantenado as posições encontradas no cenário otimizado
-    df_adversarial = cluster_ilp_secundario(
-        df,
-        df_dm,
-        best_du_count,
-        objective_mode="adversarial",
-        initial_assignment=(
-            df_otimizado.assign(
-                NumEstacao=df_otimizado["NumEstacao"].astype(int),
-                **{"O-DU": df_otimizado["O-DU"].astype(int)},
-            )
-            .set_index("NumEstacao")["O-DU"]
-            .to_dict()
-        )
-    )
-    adversarial_output = OUT_DIR / f"ilp_{Filename}_adversarial.csv"
-    print(f"Gravando o cenário adversarial em {adversarial_output}")
-    df_adversarial.to_csv(adversarial_output, index=False)
+    #df_adversarial = cluster_ilp_secundario(df,df_dm,best_du_count,objective_mode="adversarial",initial_assignment=(df_otimizado.assign(NumEstacao=df_otimizado["NumEstacao"].astype(int),**{"O-DU": df_otimizado["O-DU"].astype(int)},).set_index("NumEstacao")["O-DU"].to_dict())    )
+    #adversarial_output = OUT_DIR / f"ilp_{Filename}_adversarial.csv"
+    #print(f"Gravando o cenário adversarial em {adversarial_output}")
+    #df_adversarial.to_csv(adversarial_output, index=False)

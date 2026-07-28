@@ -106,12 +106,13 @@ if __name__ == "__main__":
     df_dm.index = df_dm.index.astype(int)
     df_dm.columns = df_dm.columns.astype(int)
 
-    padrao = f"ilp_{Filename}_*.csv"
-    for arquivo_csv in OUT_DIR.glob(padrao):
-        #abrindo o arquivo de  clusterização
-        csv_path = arquivo_csv
-        print(f"Carregando o arquivo {csv_path}")
-        cadeia = arquivo_csv.stem.split(f"ilp_{Filename}_", 1)[1]
-        df_cluster = pd.read_csv(csv_path)
-        generate_csv_to_pipeline(df_cluster, df_dm, output_filename=OUT_DIR / f"pipeline_{Filename}_{cadeia}.txt")
+    for prefixo in ("ilp_", "grd_"):
+        padrao = f"{prefixo}{Filename}_*.csv"
+        for arquivo_csv in OUT_DIR.glob(padrao):
+            #abrindo o arquivo de  clusterização
+            csv_path = arquivo_csv
+            print(f"Carregando o arquivo {csv_path}")
+            cadeia = arquivo_csv.stem.split(f"{prefixo}{Filename}_", 1)[1]
+            df_cluster = pd.read_csv(csv_path)
+            generate_csv_to_pipeline(df_cluster, df_dm, output_filename=OUT_DIR / f"pipeline_{Filename}_{cadeia}.txt")
 

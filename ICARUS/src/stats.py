@@ -23,7 +23,7 @@ def add_link_distance(
     result = df.copy()
     result["NumEstacao"] = result["NumEstacao"].astype(int)
     result["O-DU"] = result["O-DU"].astype(int)
-
+    result["bandwidth"] = pd.to_numeric(result["bandwidth"],errors="raise").astype(float)
     result["LinkDistanceKM"] = [
         float(df_dm.at[ru_id, du_id])
         for ru_id, du_id in zip(
@@ -150,13 +150,13 @@ def stats_by_odu(
         .agg(
             NumRUs=("NumEstacao", "count"),
             TotalLinkDistanceKM=("LinkDistanceKM", "sum"),
+            AggregatedLoadMHz=("bandwidth", "sum")
         )
     )
 
     grouped["NumRUs"] = grouped["NumRUs"].astype(int)
-    grouped["TotalLinkDistanceKM"] = grouped[
-        "TotalLinkDistanceKM"
-    ].astype(float)
+    grouped["TotalLinkDistanceKM"] = grouped["TotalLinkDistanceKM"].astype(float)
+    grouped["AggregatedLoadMHz"] = grouped["AggregatedLoadMHz"].astype(float)
 
     return grouped.rename(
         columns={
@@ -164,6 +164,9 @@ def stats_by_odu(
             "TotalLinkDistanceKM": (
                 f"{scenario}_TotalLinkDistanceKM"
             ),
+            "AggregatedLoadMHz": (
+                f"{scenario}_AggregatedLoadMHz"
+            )
         }
     )
 
@@ -207,7 +210,7 @@ def build_stats_by_odus(
     for scenario in scenarios:
         num_rus_col = f"{scenario}_NumRUs"
         distance_col = f"{scenario}_TotalLinkDistanceKM"
-
+        load_col = f"{scenario}_AggregatedLoadMHz"
         total_row[num_rus_col] = int(result[num_rus_col].sum())
         total_row[distance_col] = float(result[distance_col].sum())
 
