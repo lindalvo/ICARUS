@@ -231,8 +231,6 @@ def criar_solver(
     objective_mode: Optional[str] = None,
 ):
     """
-    Cria e configura exclusivamente o Gurobi.
-
     Na etapa primária, prioriza o fechamento do gap e utiliza gap absoluto
     inferior a uma unidade, adequado ao objetivo inteiro de quantidade de
     O-DUs. Na etapa secundária, mantém configuração distinta para o MILP
@@ -267,7 +265,6 @@ def criar_solver(
 
         elif objective_mode == "adversarial":
             # A maximização da variância é um MIQP não convexo.
-            opt.options["NonConvex"] = 2
             opt.options["MIPGap"] = 0.001
 
             # Procura boas soluções incumbentes sem abandonar a prova global.
@@ -373,23 +370,11 @@ def cluster_ilp_secundario(
     O cenário adversarial é um MIQP não convexo e é resolvido globalmente
     pelo Gurobi com ``NonConvex=2``.
     """
-    if best_du_count <= 0:
-        raise ValueError(
-            "best_du_count deve ser um inteiro positivo; "
-            f"recebido: {best_du_count}."
-        )
-
     modelo, dados = criar_modelo_base(
         df,
         df_dm,
         nome_modelo=f"ICARUS_Secundario_{objective_mode}",
     )
-
-    if best_du_count > len(dados.num_estacoes):
-        raise ValueError(
-            "best_du_count não pode exceder a quantidade de estações: "
-            f"{best_du_count} > {len(dados.num_estacoes)}."
-        )
 
     modelo.FixDUCount = Constraint(
         expr=sum(modelo.y[j] for j in modelo.I) == best_du_count
@@ -425,20 +410,95 @@ def cluster_ilp_secundario(
         def fix_optimized_dus_rule(mm, j):
             return mm.y[j] == (1 if j in optimized_dus else 0)
 
-        msg = (
-            "Maximizando a variância da carga agregada entre as "
-            "O-DUs ativadas."
+        modelo.FixOptimizedDUs = Constraint(
+            modelo.I,
+            rule=fix_optimized_dus_rule,
+        )
+
+        modelo.OptimizedDUs = Set(
+            initialize=sorted(optimized_dus),
+            ordered=True,
+        )
+
+        modelo.LoadDeviation = Var(
+            modelo.OptimizedDUs,
+            domain=NonNegativeReals,
+        )
+
+        modelo.AboveMean = Var(
+            modelo.OptimizedDUs,
+            domain=Binary,
+        )
+
+        big_m = float(MAX_LOAD)
+
+        def dev_lower_positive_rule(mm, j):
+            return (
+                mm.LoadDeviation[j]
+                >= mm.DULoad[j] - average_active_du_load
+            )
+
+        def dev_lower_negative_rule(mm, j):
+            return (
+                mm.LoadDeviation[j]
+                >= average_active_du_load - mm.DULoad[j]
+            )
+
+        def dev_upper_positive_rule(mm, j):
+            return (
+                mm.LoadDeviation[j]
+                <= mm.DULoad[j]
+                - average_active_du_load
+                + big_m * (1 - mm.AboveMean[j])
+            )
+
+        def dev_upper_negative_rule(mm, j):
+            return (
+                mm.LoadDeviation[j]
+                <= average_active_du_load
+                - mm.DULoad[j]
+                + big_m * mm.AboveMean[j]
+            )
+
+        modelo.DevLowerPositive = Constraint(
+            modelo.OptimizedDUs,
+            rule=dev_lower_positive_rule,
+        )
+        modelo.DevLowerNegative = Constraint(
+            modelo.OptimizedDUs,
+            rule=dev_lower_negative_rule,
+        )
+        modelo.DevUpperPositive = Constraint(
+            modelo.OptimizedDUs,
+            rule=dev_upper_positive_rule,
+        )
+        modelo.DevUpperNegative = Constraint(
+            modelo.OptimizedDUs,
+            rule=dev_upper_negative_rule,
+        )
+
+        modelo.TotalAbsoluteDeviation = Expression(
+            expr=sum(
+                modelo.LoadDeviation[j]
+                for j in modelo.OptimizedDUs
+            )
+        )
+
+        modelo.TotalDistance = Expression(
+            expr=sum(
+                modelo.dist[i, j] * modelo.x[i, j]
+                for i, j in modelo.A
+            )
         )
 
         modelo.Stage2OBJ = Objective(
-            expr=sum(
-                (
-                    modelo.DULoad[j]
-                    - average_active_du_load * modelo.y[j]
-                ) ** 2
-                for j in modelo.I
-            ),
+            expr=modelo.TotalAbsoluteDeviation,
             sense=maximize,
+        )
+        
+        msg = (
+            "Maximizando a variância da carga agregada entre as "
+            "O-DUs ativadas."
         )
 
         print(f"Carga total das O-RUs: {total_load:.2f} MHz")

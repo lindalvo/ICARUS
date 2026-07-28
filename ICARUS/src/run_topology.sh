@@ -743,8 +743,8 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     sleep 10
     echo ""
     echo "Inicio: $DATA_INICIO" 
-    echo "+ poetry run python ./get_gnbemu_kpi.py --seconds 90 --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}" 
-    poetry run python ./get_gnbemu_kpi.py --seconds 90 --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}
+    echo "+ poetry run python ./get_gnbemu_kpi.py --seconds ${DURACAO_COLETA} --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}" 
+    poetry run python ./get_gnbemu_kpi.py --seconds ${DURACAO_COLETA} --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}
 	DATA_FIM=$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')
 
     echo "============================================================"
