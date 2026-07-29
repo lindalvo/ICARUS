@@ -30,9 +30,9 @@ OUT_DIR = Path(os.environ["OUT_DIR"]).resolve()
 MAX_CLUSTER_SIZE = int(os.environ["MAX_RUS"])
 MAX_FIBER_DISTANCE_KM = float(os.environ["MAX_FIBER_DISTANCE_KM"])
 MAX_LOAD = int(os.environ["MAX_LOAD"])
-TIME_LIMIT_SOLVER = int(os.environ.get("TIME_LIMIT_SOLVER", 3200))
-MAX_SOLVER_THREADS = int(os.environ.get("MAX_SOLVER_THREADS", 32))
-DEVIATION_TOLERANCE =  0.05
+TIME_LIMIT_SOLVER = int(os.environ.get("TIME_LIMIT_SOLVER", 1800))
+MAX_SOLVER_THREADS = int(os.environ.get("MAX_SOLVER_THREADS", 4))
+DEVIATION_TOLERANCE =  0.1
 
 
 @dataclass(frozen=True)
@@ -251,12 +251,9 @@ def criar_solver(
     opt.options["TimeLimit"] = float(TIME_LIMIT_SOLVER)
 
     if etapa == "primaria":
-        # O objetivo é inteiro. Uma diferença absoluta menor que 1 prova
-        # qual é o menor valor inteiro possível para a quantidade de O-DUs.
-        opt.options["MIPGapAbs"] = 0.999
+        # O objetivo é inteiro. Uma diferença absoluta menor que 1 prova qual é o menor valor inteiro possível para a quantidade de O-DUs.
+        opt.options["MIPGapAbs"] = 1.001
         opt.options["MIPGap"] = 0.0
-
-        # Prioriza a melhoria do best bound e a prova de otimalidade.
         opt.options["MIPFocus"] = 2
 
     elif etapa == "secundaria":
@@ -343,7 +340,7 @@ def cluster_ilp_primario(
     best_du_count = int(
         round(sum(value(modelo.y[j]) for j in modelo.I))
     )
-    print(f"Número mínimo de DUs encontrado: {best_du_count}")
+    print(f"Melhor quantidade de O-DUs encontrada dentro da tolerância configurada: {best_du_count}")
 
     optimal_assignment = extrair_atribuicao(modelo, dados)
     return best_du_count, optimal_assignment
@@ -567,7 +564,7 @@ def cluster_ilp_secundario(
             objective_mode="adversarial",
         )
 
-        opt_1.options["MIPGap"] = 0.07
+        opt_1.options["MIPGap"] = 0.09
 
         print(
             "\n--- Passagem adversarial 1/2: "
@@ -778,7 +775,7 @@ if __name__ == "__main__":
     df_otimizado.to_csv(optimized_output, index=False)
 
     #Cenário adversarial maior dispersão das cargas agregadas por O-DU mantenado as posições encontradas no cenário otimizado
-    df_adversarial = cluster_ilp_secundario(df,df_dm,best_du_count,objective_mode="adversarial",initial_assignment=(df_otimizado.assign(NumEstacao=df_otimizado["NumEstacao"].astype(int),**{"O-DU": df_otimizado["O-DU"].astype(int)},).set_index("NumEstacao")["O-DU"].to_dict())    )
-    adversarial_output = OUT_DIR / f"ilp_{Filename}_adversarial.csv"
-    print(f"Gravando o cenário adversarial em {adversarial_output}")
-    df_adversarial.to_csv(adversarial_output, index=False)
+    #df_adversarial = cluster_ilp_secundario(df,df_dm,best_du_count,objective_mode="adversarial",initial_assignment=(df_otimizado.assign(NumEstacao=df_otimizado["NumEstacao"].astype(int),**{"O-DU": df_otimizado["O-DU"].astype(int)},).set_index("NumEstacao")["O-DU"].to_dict())    )
+    #adversarial_output = OUT_DIR / f"ilp_{Filename}_adversarial.csv"
+    #print(f"Gravando o cenário adversarial em {adversarial_output}")
+    #df_adversarial.to_csv(adversarial_output, index=False)
