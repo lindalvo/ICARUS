@@ -32,6 +32,7 @@ MAX_FIBER_DISTANCE_KM = float(os.environ["MAX_FIBER_DISTANCE_KM"])
 MAX_LOAD = int(os.environ["MAX_LOAD"])
 TIME_LIMIT_SOLVER = int(os.environ.get("TIME_LIMIT_SOLVER", 3200))
 MAX_SOLVER_THREADS = int(os.environ.get("MAX_SOLVER_THREADS", 32))
+DEVIATION_TOLERANCE =  0.05
 
 
 @dataclass(frozen=True)
@@ -360,8 +361,10 @@ def cluster_ilp_secundario(
 
     Modos:
       - ``otimizado``: minimiza a soma total das distâncias O-RU--O-DU;
-      - ``adversarial``: maximiza o desvio absoluto total das
-        O-DUs já ativadas.
+      - ``adversarial``:
+          1) maximiza o desvio absoluto total das cargas;
+          2) minimiza a distância total preservando pelo menos
+             ``1 - DEVIATION_TOLERANCE`` do melhor desvio encontrado.
     """
     modelo, dados = criar_modelo_base(
         df,
@@ -489,9 +492,7 @@ def cluster_ilp_secundario(
             sense=maximize,
         )
         
-        msg = (
-            "Maximizando a variância da carga agregada entre as "
-            "O-DUs ativadas."
+        msg = ("Executando cenário adversarial maximizando o desvio absoluto total e minimizando a soma total das distância de forma lexográfica."
         )
 
         print(f"Carga total das O-RUs: {total_load:.2f} MHz")
@@ -512,34 +513,16 @@ def cluster_ilp_secundario(
         )
 
     if initial_assignment is not None:
-        assignment_keys = set(initial_assignment)
-        expected_keys = set(dados.num_estacoes)
-
-        if assignment_keys != expected_keys:
-            missing = sorted(expected_keys - assignment_keys)
-            extra = sorted(assignment_keys - expected_keys)
-            raise ValueError(
-                "O initial_assignment deve conter exatamente uma atribuição "
-                "para cada O-RU. "
-                f"Ausentes: {missing[:5]}; extras: {extra[:5]}."
-            )
-
-        initial_du_count = len(set(initial_assignment.values()))
-        if initial_du_count != best_du_count:
-            raise ValueError(
-                "O warm start utiliza quantidade de O-DUs diferente da "
-                "fixada na segunda etapa: "
-                f"{initial_du_count} != {best_du_count}."
-            )
-
-        for i, j in initial_assignment.items():
-            if j not in dados.neighbors_by_i[i]:
-                raise ValueError(
-                    f"Warm start inválido: a associação ({i}, {j}) "
-                    "não respeita o conjunto de pares viáveis."
-                )
-
         aplicar_valores_iniciais(modelo, dados, initial_assignment)
+
+    ok_terms = {
+        TerminationCondition.optimal,
+        TerminationCondition.maxTimeLimit,
+        TerminationCondition.feasible,
+    }
+
+    print(f"{msg}")
+    print(f"Tempo limite por passagem: {TIME_LIMIT_SOLVER} segundos...")
 
     opt, threads = criar_solver(
         etapa="secundaria",
@@ -549,27 +532,150 @@ def cluster_ilp_secundario(
     print(f"{msg} com solver gurobi (threads={threads})...")
     print(f"Tempo limite {TIME_LIMIT_SOLVER} segundos...")
 
-    inicio = time.perf_counter()
-    results = opt.solve(
-        modelo,
-        tee=True,
-        warmstart=initial_assignment is not None,
-    )
-    fim = time.perf_counter()
+    if objective_mode == "otimizado":
+        opt, threads = criar_solver(
+            etapa="secundaria",
+            objective_mode="otimizado",
+        )
 
-    print(f"Tempo de resolução segunda etapa: {fim - inicio:.2f} segundos.")
-    term = results.solver.termination_condition
-    print(f"TerminationCondition: {term}.")
+        print(f"Solver gurobi (threads={threads})...")
 
-    ok_terms = {
-        TerminationCondition.optimal,
-        TerminationCondition.maxTimeLimit,
-        TerminationCondition.feasible,
-    }
-    if term not in ok_terms:
-        raise RuntimeError(
-            f"Gurobi terminou em estado não aceito: {term}; "
-            "nenhum resultado será exportado."
+        inicio = time.perf_counter()
+        results = opt.solve(
+            modelo,
+            tee=True,
+            warmstart=initial_assignment is not None,
+        )
+        fim = time.perf_counter()
+
+        term = results.solver.termination_condition
+        print(
+            f"Tempo de resolução segunda etapa: "
+            f"{fim - inicio:.2f} segundos."
+        )
+        print(f"TerminationCondition: {term}.")
+
+        if term not in ok_terms:
+            raise RuntimeError(
+                f"Gurobi terminou em estado não aceito: {term}."
+            )
+
+    else:
+        # Passagem 1: maximização do desvio absoluto total.
+        opt_1, threads = criar_solver(
+            etapa="secundaria",
+            objective_mode="adversarial",
+        )
+
+        opt_1.options["MIPGap"] = 0.07
+
+        print(
+            "\n--- Passagem adversarial 1/2: "
+            "maximização do desvio absoluto total ---"
+        )
+        print(f"Solver gurobi (threads={threads})...")
+
+        inicio_1 = time.perf_counter()
+        results_1 = opt_1.solve(
+            modelo,
+            tee=True,
+            warmstart=True,
+        )
+        fim_1 = time.perf_counter()
+
+        term_1 = results_1.solver.termination_condition
+        print(
+            f"Tempo da passagem 1: "
+            f"{fim_1 - inicio_1:.2f} segundos."
+        )
+        print(f"TerminationCondition passagem 1: {term_1}.")
+
+        if term_1 not in ok_terms:
+            raise RuntimeError(
+                "Gurobi terminou a passagem 1 em estado não aceito: "
+                f"{term_1}."
+            )
+
+        best_total_deviation = value(
+            modelo.TotalAbsoluteDeviation
+        )
+
+        first_pass_assignment = extrair_atribuicao(
+            modelo,
+            dados,
+        )
+        aplicar_valores_iniciais(
+            modelo,
+            dados,
+            first_pass_assignment,
+        )
+
+        minimum_total_deviation = (
+            best_total_deviation
+            * (1.0 - DEVIATION_TOLERANCE)
+        )
+
+        modelo.Stage2OBJ.deactivate()
+
+        modelo.KeepTotalDeviation = Constraint(
+            expr=modelo.TotalAbsoluteDeviation
+            >= minimum_total_deviation
+        )
+
+        modelo.DistanceOBJ = Objective(
+            expr=modelo.TotalDistance,
+            sense=minimize,
+        )
+
+        print(
+            "\n--- Passagem adversarial 2/2: "
+            "minimização da distância total ---"
+        )
+        print(
+            "Melhor desvio absoluto total encontrado: "
+            f"{best_total_deviation:.6f}"
+        )
+        print(
+            "Desvio absoluto total mínimo preservado: "
+            f"{minimum_total_deviation:.6f} "
+            f"({(1.0 - DEVIATION_TOLERANCE) * 100:.2f}%)"
+        )
+
+        opt_2, threads_2 = criar_solver(
+            etapa="secundaria",
+            objective_mode="otimizado",
+        )
+
+        print(f"Solver gurobi (threads={threads_2})...")
+
+        inicio_2 = time.perf_counter()
+        results_2 = opt_2.solve(
+            modelo,
+            tee=True,
+            warmstart=True,
+        )
+        fim_2 = time.perf_counter()
+
+        term_2 = results_2.solver.termination_condition
+        print(
+            f"Tempo da passagem 2: "
+            f"{fim_2 - inicio_2:.2f} segundos."
+        )
+        print(f"TerminationCondition passagem 2: {term_2}.")
+
+        if term_2 not in ok_terms:
+            raise RuntimeError(
+                "Gurobi terminou a passagem 2 em estado não aceito: "
+                f"{term_2}."
+            )
+
+        print(
+            "Desvio absoluto total final: "
+            f"{value(modelo.TotalAbsoluteDeviation):.6f}"
+        )
+        print(
+            "Distância total final: "
+            f"{value(modelo.TotalDistance):.6f} km"
         )
 
     # Em maxTimeLimit, a extração também funciona como verificação de que
@@ -626,7 +732,6 @@ def cluster_ilp_secundario(
     result_df["O-DU"] = result_df["O-DU"].astype(int)
     return result_df
 
-
 if __name__ == "__main__":
     # Abre os dados de entrada das O-RUs candidatas à clusterização.
     csv_path = OUT_DIR / f"grp_{Filename}.csv"
@@ -672,8 +777,8 @@ if __name__ == "__main__":
     print(f"Gravando o cenário otimizado em {optimized_output}")
     df_otimizado.to_csv(optimized_output, index=False)
 
-    # Cenário adversarial maior dispersão das cargas agregadas por O-DU mantenado as posições encontradas no cenário otimizado
-    #df_adversarial = cluster_ilp_secundario(df,df_dm,best_du_count,objective_mode="adversarial",initial_assignment=(df_otimizado.assign(NumEstacao=df_otimizado["NumEstacao"].astype(int),**{"O-DU": df_otimizado["O-DU"].astype(int)},).set_index("NumEstacao")["O-DU"].to_dict())    )
-    #adversarial_output = OUT_DIR / f"ilp_{Filename}_adversarial.csv"
-    #print(f"Gravando o cenário adversarial em {adversarial_output}")
-    #df_adversarial.to_csv(adversarial_output, index=False)
+    #Cenário adversarial maior dispersão das cargas agregadas por O-DU mantenado as posições encontradas no cenário otimizado
+    df_adversarial = cluster_ilp_secundario(df,df_dm,best_du_count,objective_mode="adversarial",initial_assignment=(df_otimizado.assign(NumEstacao=df_otimizado["NumEstacao"].astype(int),**{"O-DU": df_otimizado["O-DU"].astype(int)},).set_index("NumEstacao")["O-DU"].to_dict())    )
+    adversarial_output = OUT_DIR / f"ilp_{Filename}_adversarial.csv"
+    print(f"Gravando o cenário adversarial em {adversarial_output}")
+    df_adversarial.to_csv(adversarial_output, index=False)

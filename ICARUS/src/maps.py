@@ -170,6 +170,7 @@ def generate_map(base, clusters, output):
     base["NumEstacao"] = base["NumEstacao"].astype("int64")
     clusters["NumEstacao"] = clusters["NumEstacao"].astype("int64")
     clusters["O-DU"] = clusters["O-DU"].astype("int64")
+    clusters["O-DU_ID"] = clusters["O-DU_ID"].astype("int64")
 
     base_geo = gpd.GeoDataFrame(
         base,
@@ -291,7 +292,7 @@ def generate_map(base, clusters, output):
                 zorder=6,
             )
 
-        # O-DU e identificador NumEstacao completo.
+        # O-DU identificador.
         ax.scatter(
             du_point.x,
             du_point.y,
@@ -303,7 +304,7 @@ def generate_map(base, clusters, output):
             zorder=10,
         )
         ax.annotate(
-            str(int(cluster_id)),
+            str(int(du["O-DU_ID"])),
             xy=(du_point.x, du_point.y),
             xytext=(5, 5),
             textcoords="offset points",
@@ -410,7 +411,7 @@ if __name__ == "__main__":
     csv_path = OUT_DIR / f"grp_{Filename}.csv"
     print(f"Carregando o arquivo {csv_path}")
     base = pd.read_csv(csv_path)
-
+    ta = pd.read_csv(OUT_DIR / f"ta_{Filename}.csv")
     #abrindo o arquivos de clusterização
     for prefixo in ("ilp_", "grd_"):
         padrao = f"{prefixo}{Filename}_*.csv"
@@ -420,6 +421,7 @@ if __name__ == "__main__":
             print(f"Carregando o arquivo {csv_path}")
             clusters = pd.read_csv(csv_path)
             cadeia = arquivo_csv.stem.split(f"{prefixo}{Filename}_", 1)[1]
+            clusters = clusters.merge(ta, on="O-DU", how="left", validate="m:1")
             #Gerando os mapas de clusterização
             generate_map(base, clusters, output=OUT_DIR / f"map_{prefixo}{Filename}_{cadeia}.pdf")
 

@@ -213,6 +213,7 @@ def build_stats_by_odus(
         load_col = f"{scenario}_AggregatedLoadMHz"
         total_row[num_rus_col] = int(result[num_rus_col].sum())
         total_row[distance_col] = float(result[distance_col].sum())
+        total_row[load_col] = float(result[load_col].sum())
 
     result.loc["TOTAL"] = total_row
     result.index.name = "O-DU"
@@ -223,7 +224,7 @@ def build_stats_by_odus(
 if __name__ == "__main__":
     # A matriz é carregada apenas uma vez e reutilizada em todos os cenários.
     dm_path = OUT_DIR / f"dm_{Filename}.csv"
-
+    ta = pd.read_csv(OUT_DIR / f"ta_{Filename}.csv", dtype={"O-DU": "int64","O-DU_ID": "int64",},)
     if not dm_path.exists():
         raise FileNotFoundError(
             f"Matriz de distâncias não encontrada: {dm_path}"
@@ -248,11 +249,9 @@ if __name__ == "__main__":
             print(f"Carregando o arquivo {arquivo_csv}")
 
             clusters = pd.read_csv(arquivo_csv)
-
-            cadeia = arquivo_csv.stem.split(
-                f"{prefixo}{Filename}_",
-                1,
-            )[1]
+            clusters["O-DU"] = clusters["O-DU"].astype("int64")
+            clusters = clusters.merge(ta[["O-DU", "O-DU_ID"]],on="O-DU",how="left",validate="m:1")
+            cadeia = arquivo_csv.stem.split(f"{prefixo}{Filename}_",1,)[1]
 
             # Exemplos: ilp_otimizado e ilp_adversarial.
             scenario = f"{prefixo.rstrip('_')}_{cadeia}"
@@ -290,17 +289,13 @@ if __name__ == "__main__":
 
     # Estatísticas por O-DU: uma linha por O-DU e colunas por cenário.
     stats_by_odus_df = build_stats_by_odus(odu_tables)
-    stats_by_odus_output = (
-        OUT_DIR / f"stats_by_odus_{Filename}.csv"
-    )
 
-    stats_by_odus_df.to_csv(
-        stats_by_odus_output,
-        index=True,
-        float_format="%.6f",
-    )
+    odu_id_map = ta.set_index("O-DU")["O-DU_ID"]
+    odu_ids = (stats_by_odus_df.index.to_series().map(odu_id_map).astype("Int64"))
 
-    print(
-        "Estatísticas por O-DU gravadas em: "
-        f"{stats_by_odus_output}"
-    )
+    stats_by_odus_df.insert(0,"O-DU_ID",odu_ids,)
+    stats_by_odus_output = (OUT_DIR / f"stats_by_odus_{Filename}.csv")
+
+    stats_by_odus_df.to_csv(stats_by_odus_output,index=True,float_format="%.6f")
+
+    print("Estatísticas por O-DU gravadas em: "f"{stats_by_odus_output}")

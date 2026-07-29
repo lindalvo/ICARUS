@@ -25,7 +25,7 @@ arquivos_nome=()
 identificadores=()
 tipos_calculo=()
 
-regex="^pipeline_([0-9]{11}_[0-9]{7})_([1-9])_(otimizado|adversarial)\.txt$"
+regex="^pipeline_(${filename})_([0-9])_(otimizado|adversarial)\.txt$"
 
 # ==========================================
 # LOCALIZAÇÃO E VALIDAÇÃO DOS ARQUIVOS
