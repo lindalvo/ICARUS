@@ -1,0 +1,26 @@
+log:
+  filename: "../../ICARUS/OUT/50409307637_1501402_9/otimizado/12/gnb_1014459696/ru3_692257349.log"
+  level: error
+
+ru_emu:
+  cells:
+    - bandwidth: 80
+      network_interface: ofh_ru3
+
+      ru_mac_addr: "02:6d:30:e0:00:03"
+      du_mac_addr: "02:6d:30:d0:00:03"
+
+      enable_promiscuous: false
+
+      dl_port_id: [2]
+      ul_port_id: [2]
+      prach_port_id: [12]
+
+      compr_method_ul: "bfp"
+      compr_bitwidth_ul: 9
+      t2a_max_cp_dl: 590
+      t2a_min_cp_dl: 250
+      t2a_max_cp_ul: 590
+      t2a_min_cp_ul: 150
+      t2a_max_up: 300
+      t2a_min_up: 60

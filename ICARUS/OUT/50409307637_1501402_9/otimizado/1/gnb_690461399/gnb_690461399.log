@@ -1,0 +1,24 @@
+2026-08-05T16:52:14.730818 [GNB     ] [I] Built in Release mode using commit 6744de3b5b on branch dev
+2026-08-05T16:52:19.318267 [IO-EPOLL] [E] fd=0: Failed to register file descriptor. Cause: epoll_ctl failed with "Operation not permitted"
+2026-08-05T16:52:19.318287 [APP     ] [E] Couldn't register stdin handler
+2026-08-05T16:52:19.330394 [ASN1    ] [E] The provided bitstring value 11312519561216 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.330564 [ASN1    ] [E] The provided bitstring value 11312519561217 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.330615 [ASN1    ] [E] The provided bitstring value 11312519561218 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.330660 [ASN1    ] [E] The provided bitstring value 11312519561219 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.330702 [ASN1    ] [E] The provided bitstring value 11312519561220 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.856041 [ASN1    ] [E] The provided bitstring value 11312519561216 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.856077 [ASN1    ] [E] The provided bitstring value 11312519561216 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.856107 [ASN1    ] [E] The provided bitstring value 11312519561217 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.856116 [ASN1    ] [E] The provided bitstring value 11312519561217 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.856128 [ASN1    ] [E] The provided bitstring value 11312519561218 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.856136 [ASN1    ] [E] The provided bitstring value 11312519561218 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.856147 [ASN1    ] [E] The provided bitstring value 11312519561219 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.856155 [ASN1    ] [E] The provided bitstring value 11312519561219 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.856165 [ASN1    ] [E] The provided bitstring value 11312519561220 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.856172 [ASN1    ] [E] The provided bitstring value 11312519561220 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.856267 [ASN1    ] [E] The provided bitstring value 11312519561216 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.856283 [ASN1    ] [E] The provided bitstring value 11312519561217 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.856284 [ASN1    ] [E] The provided bitstring value 11312519561218 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.856285 [ASN1    ] [E] The provided bitstring value 11312519561219 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.856286 [ASN1    ] [E] The provided bitstring value 11312519561220 does not fit the bounds [36, 36]
+2026-08-05T16:52:19.856898 [GNB     ] [I] ==== gNB started ===
