@@ -668,8 +668,8 @@ while IFS= read -r linha || [ -n "$linha" ]; do
 	#armazenando os IDs dos processos para encerrá-los ao final
     pids=()
     echo "Executando a GNB $DU_ID:"
-    echo "+ numactl --cpunodebind=${GNB_NUMA} --membind=${GNB_NUMA} taskset -c ${GNB_CPUSET} gnb -c ${GNB_YAML} > ${GNB_OUTPUT} 2>&1 &"
-    numactl --cpunodebind="$GNB_NUMA" --membind="$GNB_NUMA" taskset -c "$GNB_CPUSET" gnb -c "$GNB_YAML" > "$GNB_OUTPUT" 2>&1 &
+    echo "+ numactl --cpunodebind=${GNB_NUMA} --membind=${GNB_NUMA} taskset -c ${GNB_CPUSET} gnb -c ${GNB_YAML} >> ${GNB_OUTPUT} 2>&1 &"
+    numactl --cpunodebind="$GNB_NUMA" --membind="$GNB_NUMA" taskset -c "$GNB_CPUSET" gnb -c "$GNB_YAML" >> "$GNB_OUTPUT" 2>&1 &
     GNB_PID=$!
     pids+=("$GNB_PID")
     echo "gNB iniciada com PID $GNB_PID."
@@ -731,20 +731,27 @@ while IFS= read -r linha || [ -n "$linha" ]; do
         fi
         echo "------------------------------------------------------------"
         echo "RU emulada $j"
-        echo "+ ip netns exec ${NS} numactl --cpunodebind=1 --membind=1 taskset -c ${RU_CPUSET} ru_emulator -c ${RU_YAML} > ${RU_OUTPUT} 2>&1 &"
-		ip netns exec "$NS" numactl --cpunodebind=1 --membind=1 taskset -c "$RU_CPUSET" ru_emulator -c "$RU_YAML" > "$RU_OUTPUT" 2>&1 &
+        echo "+ ip netns exec ${NS} numactl --cpunodebind=1 --membind=1 taskset -c ${RU_CPUSET} ru_emulator -c ${RU_YAML} >> ${RU_OUTPUT} 2>&1 &"
+		ip netns exec "$NS" numactl --cpunodebind=1 --membind=1 taskset -c "$RU_CPUSET" ru_emulator -c "$RU_YAML" >> "$RU_OUTPUT" 2>&1 &
 		pids+=($!)
     done
 
+    sleep 10
     echo "============================================================"
-    echo "       Executando a topologia por 90 Segundos para coleta de métricas de desempenho"
+    echo "       Executando a topologia por ${DURACAO_COLETA} Segundos para coleta de métricas de desempenho"
     echo "============================================================"
 	DATA_INICIO=$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')
-    sleep 10
+    STATUS_COLETA=0
     echo ""
     echo "Inicio: $DATA_INICIO" 
     echo "+ poetry run python ./get_gnbemu_kpi.py --seconds ${DURACAO_COLETA} --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}" 
-    poetry run python ./get_gnbemu_kpi.py --seconds ${DURACAO_COLETA} --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR}
+    if poetry run python ./get_gnbemu_kpi.py --seconds ${DURACAO_COLETA} --clusterid ${DU_ID} --roundtrip ${ROUNDTRIP} --cenario ${CENARIO} --identificador ${IDENTIFICADOR} ; then
+        echo "Coleta de métricas concluída com sucesso."
+    else
+        STATUS_COLETA=$?
+        echo "ERRO: get_gnbemu_kpi.py terminou com status ${STATUS_COLETA}." >&2
+        echo "Continuando para executar a limpeza da topologia..." >&2
+    fi
 	DATA_FIM=$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')
 
     echo "============================================================"
@@ -809,4 +816,10 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     sleep 5s
 done < "$ARQUIVO"
 
-echo "Processamento finalizado."
+if (( STATUS_COLETA != 0 )); then
+    echo "Topologia encerrada após falha na coleta." >&2
+    exit "$STATUS_COLETA"
+fi
+
+echo "Processamento finalizado com sucesso."
+exit 0
