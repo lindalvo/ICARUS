@@ -1,4 +1,4 @@
-ran_node_name: __GNBNAME__
+gnb_id: __GNBID__
 cu_cp:
   amf:
     no_core: false
