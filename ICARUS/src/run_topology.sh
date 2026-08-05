@@ -553,6 +553,7 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     echo ""
 
     sed \
+        -e "s|__GNB_NAME__|${DU_ID}|g" \
         -e "s|__GNB_LOG_FILENAME__|${GNB_LOG}|g" \
         -e "s|__GNB_MAC_PCAP_FILENAME__|${GNB_MAC_PCAP}|g" \
         -e "s|__GNB_F1AP_PCAP_FILENAME__|${GNB_F1AP_PCAP}|g" \
