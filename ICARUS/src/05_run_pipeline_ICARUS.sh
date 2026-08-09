@@ -261,6 +261,8 @@ execute_unit() {
     local status=0
     local kpi_iniciado=0
     local kpi_concluido=0
+    local codigo_coleta=""
+    local erro_coleta=""
     local topologia_removida=0
 
     checkpoint="$(checkpoint_path "$roundtrip" "$cenario" "$du_id")"
@@ -303,18 +305,31 @@ execute_unit() {
         rm -f -- "$TEMP_PIPELINE_ATUAL"
         TEMP_PIPELINE_ATUAL=""
 
-        # O run_topology atual usa "continue 2" em algumas falhas de startup.
-        # Nesses casos ele pode encerrar com status zero sem coletar métricas.
-        # Por isso o status do processo não é usado isoladamente.
-        if grep -Fq "get_gnbemu_kpi.py --seconds" "$log_file" && \
-           grep -Fq -- "--clusterid ${du_id} --roundtrip ${roundtrip} --cenario ${cenario}" "$log_file"; then
+        # Determina se a coleta de métricas foi iniciada 
+        if grep -Fq "KPI_STATE=CONNECTING" "$log_file"; then
             kpi_iniciado=1
         else
             kpi_iniciado=0
         fi
 
+        if grep -Fq "KPI_STATE=COMPLETED" "$log_file" ; then
+            kpi_concluido=1
+        else
+            kpi_concluido=0
+        fi
+
+        codigo_coleta="$(
+            awk -F= '/^CODIGO_COLETA=[0-9]+$/ { codigo=$2 } END { print codigo }' \
+                "$log_file"
+        )"
+
+        erro_coleta="$(
+            awk -F= '/^ERRO_COLETA=/ { erro=$2 } END { print erro }' \
+                "$log_file"
+        )"
+        
         # Esta seção somente é impressa depois que get_gnbemu_kpi.py retorna zero.
-        if grep -Fq "Estatísticas qdisc após a coleta" "$log_file"; then
+        if grep -Fq "Coleta de métricas concluída com sucesso" "$log_file"; then
             kpi_concluido=1
         else
             kpi_concluido=0
@@ -331,8 +346,7 @@ execute_unit() {
                 write_checkpoint "$checkpoint" "$roundtrip" "$cenario" "$du_id" "sucesso"
                 info "[CONCLUÍDO] roundtrip=${roundtrip} cenário=${cenario} O-DU=${du_id}"
             else
-                # As métricas foram coletadas. Não repetir, mesmo que qdisc,
-                # encerramento de processo ou limpeza posterior tenham falhado.
+                # As métricas foram coletadas.
                 write_checkpoint "$checkpoint" "$roundtrip" "$cenario" "$du_id" \
                     "metricas_coletadas_com_falha_posterior_status_${status}"
                 echo "AVISO: métricas concluídas, mas houve falha posterior à coleta." >&2
@@ -346,20 +360,37 @@ execute_unit() {
             return 0
         fi
 
-        if (( kpi_iniciado == 1 )); then
-            # O Python foi iniciado, porém não há confirmação de término. Uma
-            # repetição automática poderia duplicar uma gravação parcial.
-            echo "ERRO: a coleta foi iniciada, mas não há confirmação de conclusão." >&2
+        if [[ "$codigo_coleta" =~ ^(10|11|12|13)$ ]]; then
+            echo "AVISO: falha recuperável na coleta de métricas." >&2
             echo "  Roundtrip: $roundtrip" >&2
             echo "  Cenário:   $cenario" >&2
             echo "  O-DU:      $du_id" >&2
-            echo "  Status:    $status" >&2
+            echo "  Código:    $codigo_coleta" >&2
+            echo "  Erro:      ${erro_coleta:-não informado}" >&2
             echo "  Log:       $log_file" >&2
-            echo "A campanha foi interrompida para evitar duplicação no banco." >&2
+            echo "Nenhuma amostra foi gravada; a unidade pode ser repetida com segurança." >&2
+
+            if (( tentativa < MAX_TENTATIVAS_PRE_KPI )); then
+                echo "Repetindo a unidade..." >&2
+                sleep 5
+            fi
+
+            tentativa=$((tentativa + 1))
+            continue
+        fi
+
+        if (( kpi_iniciado == 1 )); then
+            echo "ERRO: a coleta falhou com um código não reconhecido." >&2
+            echo "  Roundtrip: $roundtrip" >&2
+            echo "  Cenário:   $cenario" >&2
+            echo "  O-DU:      $du_id" >&2
+            echo "  Status do run_topology.sh: $status" >&2
+            echo "  Código da coleta: ${codigo_coleta:-não informado}" >&2
+            echo "  Log:       $log_file" >&2
             return 1
         fi
 
-        echo "AVISO: falha ocorreu antes do início da coleta de métricas." >&2
+        echo "AVISO: falha ocorrida antes do início do coletor." >&2
         echo "  Roundtrip: $roundtrip" >&2
         echo "  Cenário:   $cenario" >&2
         echo "  O-DU:      $du_id" >&2
@@ -367,7 +398,7 @@ execute_unit() {
         echo "  Log:       $log_file" >&2
 
         if (( tentativa < MAX_TENTATIVAS_PRE_KPI )); then
-            echo "Repetindo esta unidade, pois ainda não houve coleta..." >&2
+            echo "Repetindo a unidade..." >&2
             sleep 5
         fi
 
@@ -378,6 +409,8 @@ execute_unit() {
     echo "  Roundtrip: $roundtrip" >&2
     echo "  Cenário:   $cenario" >&2
     echo "  O-DU:      $du_id" >&2
+    echo "  Código coleta: ${codigo_coleta:-não informado}" >&2
+    echo "  Erro coleta:   ${erro_coleta:-não informado}" >&2
     echo "  Último log: $log_file" >&2
     return 1
 }

@@ -736,7 +736,7 @@ while IFS= read -r linha || [ -n "$linha" ]; do
 		pids+=($!)
     done
 
-    sleep 10
+    sleep 7
     echo "============================================================"
     echo "       Executando a topologia por ${DURACAO_COLETA} Segundos para coleta de métricas de desempenho"
     echo "============================================================"
@@ -750,6 +750,28 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     else
         STATUS_COLETA=$?
         echo "ERRO: get_gnbemu_kpi.py terminou com status ${STATUS_COLETA}." >&2
+        case "$STATUS_COLETA" in
+            10)
+                echo "ERRO_COLETA=CONEXAO_FALHOU"
+                echo "ERRO: não foi possível conectar ao WebSocket da gNB." >&2
+                ;;
+            11)
+                echo "ERRO_COLETA=INSCRICAO_FALHOU"
+                echo "ERRO: não foi possível inscrever-se nas métricas da gNB." >&2
+                ;;
+            12)
+                echo "ERRO_COLETA=WEBSOCKET_CAIU_ANTES_DA_PRIMEIRA_AMOSTRA"
+                echo "ERRO: o WebSocket caiu antes da primeira amostra." >&2
+                ;;
+            13)
+                echo "ERRO_COLETA=WEBSOCKET_CAIU_APOS_COLETA_PARCIAL"
+                echo "ERRO: o WebSocket caiu durante a coleta." >&2
+                ;;
+            *)
+                echo "ERRO_COLETA=DESCONHECIDO"
+                echo "ERRO: get_gnbemu_kpi.py terminou com status ${STATUS_COLETA}." >&2
+                ;;
+        esac        
         echo "Continuando para executar a limpeza da topologia..." >&2
     fi
 	DATA_FIM=$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')
@@ -813,7 +835,7 @@ while IFS= read -r linha || [ -n "$linha" ]; do
     echo ""
     echo "Topologia da GNB/DU $DU_ID removida."
     echo ""
-    sleep 5s
+    sleep 2s
 done < "$ARQUIVO"
 
 if (( STATUS_COLETA != 0 )); then

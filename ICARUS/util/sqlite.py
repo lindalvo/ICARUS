@@ -1,7 +1,6 @@
 import os
 import sqlite3
-from pathlib import Path
-from typing import Iterator
+from typing import Iterable, Mapping
 from dotenv import find_dotenv, load_dotenv
 
 load_dotenv(find_dotenv())
@@ -34,16 +33,7 @@ def init_db():
         """)
 
 
-def upsert_scenario(
-    identificador,
-    roundtrip,
-    cluster_id,
-    cenario,
-    timestamp_utc,
-    metric,
-    value,
-    unit
-):
+def upsert_scenario(amostras: Iterable[Mapping]):
     sql = """
     INSERT INTO stats (
         identificador,
@@ -70,16 +60,28 @@ def upsert_scenario(
         unit = excluded.unit
     """
 
-    values = (
-        identificador,
-        roundtrip,
-        cluster_id,
-        cenario,
-        timestamp_utc,
-        metric,
-        value,
-        unit
-    )
+    values = []
 
-    with _get_connection() as conn:
-        conn.execute(sql, values)
+    for indice, amostra in enumerate(amostras):
+        values.append((
+            amostra["identificador"],
+            amostra["roundtrip"],
+            amostra["cluster_id"],
+            amostra["cenario"],
+            amostra["timestamp_utc"],
+            amostra["metric"],
+            amostra["value"],
+            amostra["unit"]
+        ))
+
+    conn = _get_connection()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.executemany(sql, values)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        print("Erro ao inserir amostras no banco de dados. Desfazendo alterações.", flush=True)
+        raise
+    finally:
+        conn.close()

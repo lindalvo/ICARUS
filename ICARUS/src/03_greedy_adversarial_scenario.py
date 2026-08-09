@@ -278,7 +278,7 @@ def concentrate_load_greedy(
     Aumenta diferença de carga entre as O-DUs.
 
     Parâmetros
-    df_opex: DataFrame da solução OPEX/CAPEX.
+    df: DataFrame da solução otimizada.
     df_dm: DataFrame da matriz de distâncias, indexado por NumEstacao.
     verbose
 
@@ -345,7 +345,7 @@ def concentrate_load_greedy(
 
 
 def main() -> None:
-    #abrindo o arquivo com Associações OPEX/CAPEX feitas pelo ILP
+    #abrindo o arquivo com Associações otimizadas feitas pelo ILP
     csv_path = OUT_DIR / f"ilp_{Filename}_otimizado.csv"
     print(f"Carregando o arquivo {csv_path}")
     df_opex = pd.read_csv(csv_path)

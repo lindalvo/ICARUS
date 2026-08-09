@@ -32,7 +32,6 @@ MAX_FIBER_DISTANCE_KM = float(os.environ["MAX_FIBER_DISTANCE_KM"])
 MAX_LOAD = int(os.environ["MAX_LOAD"])
 TIME_LIMIT_SOLVER = int(os.environ.get("TIME_LIMIT_SOLVER", 1800))
 MAX_SOLVER_THREADS = int(os.environ.get("MAX_SOLVER_THREADS", 4))
-DEVIATION_TOLERANCE =  0.1
 
 
 @dataclass(frozen=True)
@@ -251,9 +250,13 @@ def criar_solver(
     opt.options["TimeLimit"] = float(TIME_LIMIT_SOLVER)
 
     if etapa == "primaria":
-        # O objetivo é inteiro. Uma diferença absoluta menor que 1 prova qual é o menor valor inteiro possível para a quantidade de O-DUs.
-        opt.options["MIPGapAbs"] = 1.001
-        opt.options["MIPGap"] = 0.0
+        # Aceita gap absoluto de 1 unidade, pois o objetivo é inteiro (quantidade de O-DUs). O gap relativo é zero, garantindo que a solução ótima seja provada.
+        opt.options["MIPGapAbs"] = 0.999
+        opt.options["MIPGap"] = 0.056
+        # Aceita solução interia imediatamente acima do limite inferior, mesmo que não seja ótima, para acelerar a convergência.
+        #opt.options["MIPGapAbs"] = 1.001
+        #opt.options["MIPGap"] = 0.0
+
         opt.options["MIPFocus"] = 2
 
     elif etapa == "secundaria":
@@ -359,9 +362,10 @@ def cluster_ilp_secundario(
     Modos:
       - ``otimizado``: minimiza a soma total das distâncias O-RU--O-DU;
       - ``adversarial``:
-          1) maximiza o desvio absoluto total das cargas;
-          2) minimiza a distância total preservando pelo menos
-             ``1 - DEVIATION_TOLERANCE`` do melhor desvio encontrado.
+          1) maximiza a amplitude das cargas agregadas, isto é, a diferença
+             entre a maior e a menor carga de O-DU;
+          2) minimiza a distância total preservando exatamente a melhor
+             amplitude encontrada (desempate lexicográfico).
     """
     modelo, dados = criar_modelo_base(
         df,
@@ -413,68 +417,49 @@ def cluster_ilp_secundario(
             ordered=True,
         )
 
-        modelo.LoadDeviation = Var(
-            modelo.OptimizedDUs,
+        # Extremos reais entre as O-DUs fixadas. Os seletores impedem que
+        # MaxDULoad e MinDULoad assumam apenas limites artificiais.
+        modelo.MaxDULoad = Var(
             domain=NonNegativeReals,
+            bounds=(0.0, float(MAX_LOAD)),
         )
-
-        modelo.AboveMean = Var(
-            modelo.OptimizedDUs,
-            domain=Binary,
+        modelo.MinDULoad = Var(
+            domain=NonNegativeReals,
+            bounds=(0.0, float(MAX_LOAD)),
         )
+        modelo.IsMaxLoadDU = Var(modelo.OptimizedDUs, domain=Binary)
+        modelo.IsMinLoadDU = Var(modelo.OptimizedDUs, domain=Binary)
 
         big_m = float(MAX_LOAD)
 
-        def dev_lower_positive_rule(mm, j):
-            return (
-                mm.LoadDeviation[j]
-                >= mm.DULoad[j] - average_active_du_load
-            )
-
-        def dev_lower_negative_rule(mm, j):
-            return (
-                mm.LoadDeviation[j]
-                >= average_active_du_load - mm.DULoad[j]
-            )
-
-        def dev_upper_positive_rule(mm, j):
-            return (
-                mm.LoadDeviation[j]
-                <= mm.DULoad[j]
-                - average_active_du_load
-                + big_m * (1 - mm.AboveMean[j])
-            )
-
-        def dev_upper_negative_rule(mm, j):
-            return (
-                mm.LoadDeviation[j]
-                <= average_active_du_load
-                - mm.DULoad[j]
-                + big_m * mm.AboveMean[j]
-            )
-
-        modelo.DevLowerPositive = Constraint(
+        modelo.MaxLoadLowerBound = Constraint(
             modelo.OptimizedDUs,
-            rule=dev_lower_positive_rule,
+            rule=lambda mm, j: mm.MaxDULoad >= mm.DULoad[j],
         )
-        modelo.DevLowerNegative = Constraint(
+        modelo.MaxLoadSelected = Constraint(
             modelo.OptimizedDUs,
-            rule=dev_lower_negative_rule,
+            rule=lambda mm, j: mm.MaxDULoad
+            <= mm.DULoad[j] + big_m * (1 - mm.IsMaxLoadDU[j]),
         )
-        modelo.DevUpperPositive = Constraint(
-            modelo.OptimizedDUs,
-            rule=dev_upper_positive_rule,
-        )
-        modelo.DevUpperNegative = Constraint(
-            modelo.OptimizedDUs,
-            rule=dev_upper_negative_rule,
+        modelo.SelectOneMaxLoadDU = Constraint(
+            expr=sum(modelo.IsMaxLoadDU[j] for j in modelo.OptimizedDUs) == 1
         )
 
-        modelo.TotalAbsoluteDeviation = Expression(
-            expr=sum(
-                modelo.LoadDeviation[j]
-                for j in modelo.OptimizedDUs
-            )
+        modelo.MinLoadUpperBound = Constraint(
+            modelo.OptimizedDUs,
+            rule=lambda mm, j: mm.MinDULoad <= mm.DULoad[j],
+        )
+        modelo.MinLoadSelected = Constraint(
+            modelo.OptimizedDUs,
+            rule=lambda mm, j: mm.MinDULoad
+            >= mm.DULoad[j] - big_m * (1 - mm.IsMinLoadDU[j]),
+        )
+        modelo.SelectOneMinLoadDU = Constraint(
+            expr=sum(modelo.IsMinLoadDU[j] for j in modelo.OptimizedDUs) == 1
+        )
+
+        modelo.LoadRange = Expression(
+            expr=modelo.MaxDULoad - modelo.MinDULoad
         )
 
         modelo.TotalDistance = Expression(
@@ -485,11 +470,11 @@ def cluster_ilp_secundario(
         )
 
         modelo.Stage2OBJ = Objective(
-            expr=modelo.TotalAbsoluteDeviation,
+            expr=modelo.LoadRange,
             sense=maximize,
         )
         
-        msg = ("Executando cenário adversarial maximizando o desvio absoluto total e minimizando a soma total das distância de forma lexográfica."
+        msg = ("Executando cenário adversarial maximizando a amplitude das cargas e minimizando a soma total das distâncias de forma lexicográfica."
         )
 
         print(f"Carga total das O-RUs: {total_load:.2f} MHz")
@@ -558,7 +543,7 @@ def cluster_ilp_secundario(
             )
 
     else:
-        # Passagem 1: maximização do desvio absoluto total.
+        # Passagem 1: maximização da diferença entre as cargas extremas.
         opt_1, threads = criar_solver(
             etapa="secundaria",
             objective_mode="adversarial",
@@ -568,7 +553,7 @@ def cluster_ilp_secundario(
 
         print(
             "\n--- Passagem adversarial 1/2: "
-            "maximização do desvio absoluto total ---"
+            "maximização da amplitude das cargas ---"
         )
         print(f"Solver gurobi (threads={threads})...")
 
@@ -593,9 +578,7 @@ def cluster_ilp_secundario(
                 f"{term_1}."
             )
 
-        best_total_deviation = value(
-            modelo.TotalAbsoluteDeviation
-        )
+        best_load_range = value(modelo.LoadRange)
 
         first_pass_assignment = extrair_atribuicao(
             modelo,
@@ -607,16 +590,13 @@ def cluster_ilp_secundario(
             first_pass_assignment,
         )
 
-        minimum_total_deviation = (
-            best_total_deviation
-            * (1.0 - DEVIATION_TOLERANCE)
-        )
-
         modelo.Stage2OBJ.deactivate()
 
-        modelo.KeepTotalDeviation = Constraint(
-            expr=modelo.TotalAbsoluteDeviation
-            >= minimum_total_deviation
+        # As cargas são somas dos valores de bandwidth da entrada. A
+        # igualdade torna a distância um desempate estrito, sem sacrificar a
+        # agressividade obtida na primeira passagem.
+        modelo.KeepBestLoadRange = Constraint(
+            expr=modelo.LoadRange == best_load_range
         )
 
         modelo.DistanceOBJ = Objective(
@@ -629,13 +609,8 @@ def cluster_ilp_secundario(
             "minimização da distância total ---"
         )
         print(
-            "Melhor desvio absoluto total encontrado: "
-            f"{best_total_deviation:.6f}"
-        )
-        print(
-            "Desvio absoluto total mínimo preservado: "
-            f"{minimum_total_deviation:.6f} "
-            f"({(1.0 - DEVIATION_TOLERANCE) * 100:.2f}%)"
+            "Melhor amplitude de carga encontrada e preservada: "
+            f"{best_load_range:.6f} MHz"
         )
 
         opt_2, threads_2 = criar_solver(
@@ -667,8 +642,8 @@ def cluster_ilp_secundario(
             )
 
         print(
-            "Desvio absoluto total final: "
-            f"{value(modelo.TotalAbsoluteDeviation):.6f}"
+            "Amplitude final das cargas: "
+            f"{value(modelo.LoadRange):.6f} MHz"
         )
         print(
             "Distância total final: "
@@ -763,17 +738,12 @@ if __name__ == "__main__":
     best_du_count, primary_assignment = cluster_ilp_primario(df, df_dm)
 
     # Cenário otimizado: menor soma das distâncias RU-DU.
-    df_otimizado = cluster_ilp_secundario(
-        df,
-        df_dm,
-        best_du_count,
-        objective_mode="otimizado",
-        initial_assignment=primary_assignment,
-    )
+    df_otimizado = cluster_ilp_secundario(df,df_dm,best_du_count,objective_mode="otimizado",initial_assignment=primary_assignment,)
     optimized_output = OUT_DIR / f"ilp_{Filename}_otimizado.csv"
     print(f"Gravando o cenário otimizado em {optimized_output}")
     df_otimizado.to_csv(optimized_output, index=False)
-
+    #df_otimizado = pd.read_csv(optimized_output)
+    
     #Cenário adversarial maior dispersão das cargas agregadas por O-DU mantenado as posições encontradas no cenário otimizado
     #df_adversarial = cluster_ilp_secundario(df,df_dm,best_du_count,objective_mode="adversarial",initial_assignment=(df_otimizado.assign(NumEstacao=df_otimizado["NumEstacao"].astype(int),**{"O-DU": df_otimizado["O-DU"].astype(int)},).set_index("NumEstacao")["O-DU"].to_dict())    )
     #adversarial_output = OUT_DIR / f"ilp_{Filename}_adversarial.csv"
