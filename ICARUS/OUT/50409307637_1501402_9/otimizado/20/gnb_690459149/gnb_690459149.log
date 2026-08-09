@@ -1,4 +1,0 @@
-2026-08-01T12:22:57.520370 [GNB     ] [I] Built in Release mode using commit 6744de3b5b on branch dev
-2026-08-01T12:23:01.908028 [IO-EPOLL] [E] fd=0: Failed to register file descriptor. Cause: epoll_ctl failed with "Operation not permitted"
-2026-08-01T12:23:01.908050 [APP     ] [E] Couldn't register stdin handler
-2026-08-01T12:23:02.459006 [GNB     ] [I] ==== gNB started ===
