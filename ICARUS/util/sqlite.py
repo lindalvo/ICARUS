@@ -73,7 +73,8 @@ def upsert_scenario(amostras: Iterable[Mapping]):
             amostra["value"],
             amostra["unit"]
         ))
-
+    if not values:
+        raise ValueError("Nenhuma amostra recebida para gravacao")
     conn = _get_connection()
     try:
         conn.execute("BEGIN IMMEDIATE")

@@ -142,9 +142,10 @@ if __name__ == "__main__":
         if not amostras:
             emitir_estado("ERROR", code=12, type="connection_closed", message=repr(exc))
             sys.exit(12)
-        emitir_estado("ERROR", code=13, type="websocket_closed_after_partial_collection", message=repr(exc), samples_collected=len(amostras), message=repr(exc))
+        emitir_estado("ERROR", code=13, type="websocket_closed_after_partial_collection", message=repr(exc), samples_collected=len(amostras))
         sys.exit(13)
     finally:
         if ws is not None:
             ws.close()
     upsert_scenario(amostras)
+    emitir_estado("COMPLETED",samples=len(amostras),duration=f"{time.monotonic() - inicio:.2f}")
