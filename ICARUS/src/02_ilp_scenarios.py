@@ -252,7 +252,7 @@ def criar_solver(
     if etapa == "primaria":
         # Aceita gap absoluto de 1 unidade, pois o objetivo é inteiro (quantidade de O-DUs). O gap relativo é zero, garantindo que a solução ótima seja provada.
         opt.options["MIPGapAbs"] = 0.999
-        opt.options["MIPGap"] = 0.056
+        opt.options["MIPGap"] = 0.06
         # Aceita solução interia imediatamente acima do limite inferior, mesmo que não seja ótima, para acelerar a convergência.
         #opt.options["MIPGapAbs"] = 1.001
         #opt.options["MIPGap"] = 0.0
@@ -362,10 +362,11 @@ def cluster_ilp_secundario(
     Modos:
       - ``otimizado``: minimiza a soma total das distâncias O-RU--O-DU;
       - ``adversarial``:
-          1) maximiza a amplitude das cargas agregadas, isto é, a diferença
-             entre a maior e a menor carga de O-DU;
-          2) minimiza a distância total preservando exatamente a melhor
-             amplitude encontrada (desempate lexicográfico).
+      - ``adversarial``:
+          1) maximiza a quantidade de O-DUs cuja composição foi alterada;
+          2) maximiza a quantidade de O-RUs realocadas;
+          3) maximiza a quantidade de níveis distintos de fanout utilizados;
+          4) minimiza a distância total preservando exatamente os melhores valores encontrados nas passagens anteriores.
     """
     modelo, dados = criar_modelo_base(
         df,
@@ -417,49 +418,102 @@ def cluster_ilp_secundario(
             ordered=True,
         )
 
-        # Extremos reais entre as O-DUs fixadas. Os seletores impedem que
-        # MaxDULoad e MinDULoad assumam apenas limites artificiais.
-        modelo.MaxDULoad = Var(
-            domain=NonNegativeReals,
-            bounds=(0.0, float(MAX_LOAD)),
-        )
-        modelo.MinDULoad = Var(
-            domain=NonNegativeReals,
-            bounds=(0.0, float(MAX_LOAD)),
-        )
-        modelo.IsMaxLoadDU = Var(modelo.OptimizedDUs, domain=Binary)
-        modelo.IsMinLoadDU = Var(modelo.OptimizedDUs, domain=Binary)
+        original_members_by_du = {
+            j: {
+                int(i)
+                for i, original_j in initial_assignment.items()
+                if int(original_j) == j
+            }
+            for j in optimized_dus
+        }
 
-        big_m = float(MAX_LOAD)
+        # CompositionChanged[j] = 1 se ao menos uma O-RU saiu da composição
+        # original da O-DU j ou uma nova O-RU passou a integrá-la.
+        modelo.CompositionChanged = Var(modelo.OptimizedDUs, domain=Binary)
 
-        modelo.MaxLoadLowerBound = Constraint(
+        def composition_mismatches_rule(mm, j):
+            original_members = original_members_by_du[j]
+            removed_rus = sum(
+                1 - mm.x[i, j]
+                for i in original_members
+            )
+            added_rus = sum(
+                mm.x[i, j]
+                for i in dados.incoming_by_j[j]
+                if i not in original_members
+            )
+            return removed_rus + added_rus
+
+        modelo.CompositionMismatches = Expression(
             modelo.OptimizedDUs,
-            rule=lambda mm, j: mm.MaxDULoad >= mm.DULoad[j],
+            rule=composition_mismatches_rule,
         )
-        modelo.MaxLoadSelected = Constraint(
+        modelo.ActivateCompositionChanged = Constraint(
             modelo.OptimizedDUs,
-            rule=lambda mm, j: mm.MaxDULoad
-            <= mm.DULoad[j] + big_m * (1 - mm.IsMaxLoadDU[j]),
+            rule=lambda mm, j: mm.CompositionMismatches[j]
+            >= mm.CompositionChanged[j],
         )
-        modelo.SelectOneMaxLoadDU = Constraint(
-            expr=sum(modelo.IsMaxLoadDU[j] for j in modelo.OptimizedDUs) == 1
+        modelo.ChangeOnlyIfCompositionDiffers = Constraint(
+            modelo.OptimizedDUs,
+            rule=lambda mm, j: mm.CompositionMismatches[j]
+            <= 2 * MAX_CLUSTER_SIZE * mm.CompositionChanged[j],
         )
 
-        modelo.MinLoadUpperBound = Constraint(
-            modelo.OptimizedDUs,
-            rule=lambda mm, j: mm.MinDULoad <= mm.DULoad[j],
+        modelo.ChangedDUCount = Expression(
+            expr=sum(
+                modelo.CompositionChanged[j] for j in modelo.OptimizedDUs
+            )
         )
-        modelo.MinLoadSelected = Constraint(
-            modelo.OptimizedDUs,
-            rule=lambda mm, j: mm.MinDULoad
-            >= mm.DULoad[j] - big_m * (1 - mm.IsMinLoadDU[j]),
-        )
-        modelo.SelectOneMinLoadDU = Constraint(
-            expr=sum(modelo.IsMinLoadDU[j] for j in modelo.OptimizedDUs) == 1
+        modelo.ReassignedRUCount = Expression(
+            expr=sum(
+                1 - modelo.x[i, int(initial_assignment[i])]
+                for i in dados.num_estacoes
+            )
         )
 
-        modelo.LoadRange = Expression(
-            expr=modelo.MaxDULoad - modelo.MinDULoad
+        # ExactFanout[j,k] = 1 se a O-DU j atende exatamente k O-RUs.
+        # UsedFanoutLevel[k] = 1 se ao menos uma O-DU utiliza o nível k.
+        modelo.FanoutLevels = Set(
+            initialize=range(1, MAX_CLUSTER_SIZE + 1),
+            ordered=True,
+        )
+        modelo.ExactFanout = Var(
+            modelo.OptimizedDUs,
+            modelo.FanoutLevels,
+            domain=Binary,
+        )
+        modelo.UsedFanoutLevel = Var(modelo.FanoutLevels, domain=Binary)
+
+        modelo.SelectOneFanout = Constraint(
+            modelo.OptimizedDUs,
+            rule=lambda mm, j: sum(
+                mm.ExactFanout[j, k] for k in mm.FanoutLevels
+            ) == 1,
+        )
+        modelo.LinkExactFanout = Constraint(
+            modelo.OptimizedDUs,
+            rule=lambda mm, j: sum(
+                mm.x[i, j] for i in dados.incoming_by_j[j]
+            ) == sum(
+                k * mm.ExactFanout[j, k] for k in mm.FanoutLevels
+            ),
+        )
+        modelo.ActivateUsedFanoutLevel = Constraint(
+            modelo.OptimizedDUs,
+            modelo.FanoutLevels,
+            rule=lambda mm, j, k: mm.UsedFanoutLevel[k]
+            >= mm.ExactFanout[j, k],
+        )
+        modelo.UseOnlyExistingFanoutLevel = Constraint(
+            modelo.FanoutLevels,
+            rule=lambda mm, k: mm.UsedFanoutLevel[k]
+            <= sum(mm.ExactFanout[j, k] for j in mm.OptimizedDUs),
+        )
+
+        modelo.DistinctFanoutLevels = Expression(
+            expr=sum(
+                modelo.UsedFanoutLevel[k] for k in modelo.FanoutLevels
+            )
         )
 
         modelo.TotalDistance = Expression(
@@ -470,12 +524,11 @@ def cluster_ilp_secundario(
         )
 
         modelo.Stage2OBJ = Objective(
-            expr=modelo.LoadRange,
+            expr=modelo.ChangedDUCount,
             sense=maximize,
         )
         
-        msg = ("Executando cenário adversarial maximizando a amplitude das cargas e minimizando a soma total das distâncias de forma lexicográfica."
-        )
+        msg = ("Executando cenário adversarial maximizando O-DUs alteradas, O-RUs realocadas e diversidade de fanout, antes de minimizar a distância total.")
 
         print(f"Carga total das O-RUs: {total_load:.2f} MHz")
         print(
@@ -543,17 +596,17 @@ def cluster_ilp_secundario(
             )
 
     else:
-        # Passagem 1: maximização da diferença entre as cargas extremas.
+        # Passagem 1: maximização da quantidade de O-DUs alteradas.
         opt_1, threads = criar_solver(
             etapa="secundaria",
             objective_mode="adversarial",
         )
 
-        opt_1.options["MIPGap"] = 0.09
+        opt_1.options["MIPGap"] = 0.0
 
         print(
-            "\n--- Passagem adversarial 1/2: "
-            "maximização da amplitude das cargas ---"
+            "\n--- Passagem adversarial 1/4: "
+            "maximização da quantidade de O-DUs alteradas ---"
         )
         print(f"Solver gurobi (threads={threads})...")
 
@@ -578,7 +631,9 @@ def cluster_ilp_secundario(
                 f"{term_1}."
             )
 
-        best_load_range = value(modelo.LoadRange)
+        best_changed_dus = int(
+            round(value(modelo.ChangedDUCount))
+        )
 
         first_pass_assignment = extrair_atribuicao(
             modelo,
@@ -592,31 +647,31 @@ def cluster_ilp_secundario(
 
         modelo.Stage2OBJ.deactivate()
 
-        # As cargas são somas dos valores de bandwidth da entrada. A
-        # igualdade torna a distância um desempate estrito, sem sacrificar a
-        # agressividade obtida na primeira passagem.
-        modelo.KeepBestLoadRange = Constraint(
-            expr=modelo.LoadRange == best_load_range
+        modelo.KeepBestChangedDUCount = Constraint(
+            expr=modelo.ChangedDUCount == best_changed_dus
         )
 
-        modelo.DistanceOBJ = Objective(
-            expr=modelo.TotalDistance,
-            sense=minimize,
+        # Passagem 2: maximização das O-RUs realocadas, preservando a maior
+        # quantidade encontrada de O-DUs alteradas.
+        modelo.ReassignedRUOBJ = Objective(
+            expr=modelo.ReassignedRUCount,
+            sense=maximize,
         )
 
         print(
-            "\n--- Passagem adversarial 2/2: "
-            "minimização da distância total ---"
+            "\n--- Passagem adversarial 2/4: "
+            "maximização da quantidade de O-RUs realocadas ---"
         )
         print(
-            "Melhor amplitude de carga encontrada e preservada: "
-            f"{best_load_range:.6f} MHz"
+            "Maior quantidade de O-DUs alteradas encontrada e preservada: "
+            f"{best_changed_dus}"
         )
 
         opt_2, threads_2 = criar_solver(
             etapa="secundaria",
-            objective_mode="otimizado",
+            objective_mode="adversarial",
         )
+        opt_2.options["MIPGap"] = 0.0
 
         print(f"Solver gurobi (threads={threads_2})...")
 
@@ -641,9 +696,109 @@ def cluster_ilp_secundario(
                 f"{term_2}."
             )
 
+        best_reassigned_rus = int(
+            round(value(modelo.ReassignedRUCount))
+        )
+        second_pass_assignment = extrair_atribuicao(modelo, dados)
+        aplicar_valores_iniciais(modelo, dados, second_pass_assignment)
+
+        modelo.ReassignedRUOBJ.deactivate()
+        modelo.KeepBestReassignedRUCount = Constraint(
+            expr=modelo.ReassignedRUCount == best_reassigned_rus
+        )
+
+        # Passagem 3: maximização da diversidade de fanout.
+        modelo.FanoutDiversityOBJ = Objective(
+            expr=modelo.DistinctFanoutLevels,
+            sense=maximize,
+        )
+
         print(
-            "Amplitude final das cargas: "
-            f"{value(modelo.LoadRange):.6f} MHz"
+            "\n--- Passagem adversarial 3/4: "
+            "maximização da diversidade de fanout ---"
+        )
+        print(
+            "Maior quantidade de O-RUs realocadas encontrada e preservada: "
+            f"{best_reassigned_rus}"
+        )
+
+        opt_3, threads_3 = criar_solver(
+            etapa="secundaria",
+            objective_mode="adversarial",
+        )
+        opt_3.options["MIPGap"] = 0.0
+        print(f"Solver gurobi (threads={threads_3})...")
+
+        inicio_3 = time.perf_counter()
+        results_3 = opt_3.solve(modelo, tee=True, warmstart=True)
+        fim_3 = time.perf_counter()
+        term_3 = results_3.solver.termination_condition
+        print(f"Tempo da passagem 3: {fim_3 - inicio_3:.2f} segundos.")
+        print(f"TerminationCondition passagem 3: {term_3}.")
+
+        if term_3 not in ok_terms:
+            raise RuntimeError(
+                "Gurobi terminou a passagem 3 em estado não aceito: "
+                f"{term_3}."
+            )
+
+        best_distinct_fanout_levels = int(
+            round(value(modelo.DistinctFanoutLevels))
+        )
+        third_pass_assignment = extrair_atribuicao(modelo, dados)
+        aplicar_valores_iniciais(modelo, dados, third_pass_assignment)
+
+        modelo.FanoutDiversityOBJ.deactivate()
+        modelo.KeepBestFanoutDiversity = Constraint(
+            expr=modelo.DistinctFanoutLevels
+            == best_distinct_fanout_levels
+        )
+
+        # Passagem 4: distância como último desempate lexicográfico.
+        modelo.DistanceOBJ = Objective(
+            expr=modelo.TotalDistance,
+            sense=minimize,
+        )
+
+        print(
+            "\n--- Passagem adversarial 4/4: "
+            "minimização da distância total ---"
+        )
+        print(
+            "Maior quantidade de níveis distintos de fanout encontrada "
+            f"e preservada: {best_distinct_fanout_levels}"
+        )
+
+        opt_4, threads_4 = criar_solver(
+            etapa="secundaria",
+            objective_mode="otimizado",
+        )
+        print(f"Solver gurobi (threads={threads_4})...")
+
+        inicio_4 = time.perf_counter()
+        results_4 = opt_4.solve(modelo, tee=True, warmstart=True)
+        fim_4 = time.perf_counter()
+        term_4 = results_4.solver.termination_condition
+        print(f"Tempo da passagem 4: {fim_4 - inicio_4:.2f} segundos.")
+        print(f"TerminationCondition passagem 4: {term_4}.")
+
+        if term_4 not in ok_terms:
+            raise RuntimeError(
+                "Gurobi terminou a passagem 4 em estado não aceito: "
+                f"{term_4}."
+            )
+
+        print(
+            "Quantidade final de O-DUs com composição alterada: "
+            f"{int(round(value(modelo.ChangedDUCount)))}"
+        )
+        print(
+            "Quantidade final de O-RUs realocadas: "
+            f"{int(round(value(modelo.ReassignedRUCount)))}"
+        )
+        print(
+            "Quantidade final de níveis distintos de fanout: "
+            f"{int(round(value(modelo.DistinctFanoutLevels)))}"
         )
         print(
             "Distância total final: "
@@ -745,7 +900,7 @@ if __name__ == "__main__":
     #df_otimizado = pd.read_csv(optimized_output)
     
     #Cenário adversarial maior dispersão das cargas agregadas por O-DU mantenado as posições encontradas no cenário otimizado
-    #df_adversarial = cluster_ilp_secundario(df,df_dm,best_du_count,objective_mode="adversarial",initial_assignment=(df_otimizado.assign(NumEstacao=df_otimizado["NumEstacao"].astype(int),**{"O-DU": df_otimizado["O-DU"].astype(int)},).set_index("NumEstacao")["O-DU"].to_dict())    )
-    #adversarial_output = OUT_DIR / f"ilp_{Filename}_adversarial.csv"
-    #print(f"Gravando o cenário adversarial em {adversarial_output}")
-    #df_adversarial.to_csv(adversarial_output, index=False)
+    df_adversarial = cluster_ilp_secundario(df,df_dm,best_du_count,objective_mode="adversarial",initial_assignment=(df_otimizado.assign(NumEstacao=df_otimizado["NumEstacao"].astype(int),**{"O-DU": df_otimizado["O-DU"].astype(int)},).set_index("NumEstacao")["O-DU"].to_dict())    )
+    adversarial_output = OUT_DIR / f"ilp_{Filename}_adversarial.csv"
+    print(f"Gravando o cenário adversarial em {adversarial_output}")
+    df_adversarial.to_csv(adversarial_output, index=False)

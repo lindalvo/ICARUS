@@ -7,7 +7,8 @@ load_dotenv(find_dotenv())
 
 BASE_DIR = os.path.abspath('../OUT')
 print(f"BASE_DIR={BASE_DIR}")
-DB_PATH = os.path.join(BASE_DIR, "icarus.db")
+Filename = os.environ["Filename"]
+DB_PATH = os.path.join(BASE_DIR, f"{Filename}.db")
 print(f"DB_PATH={DB_PATH}")
 
 def _get_connection():

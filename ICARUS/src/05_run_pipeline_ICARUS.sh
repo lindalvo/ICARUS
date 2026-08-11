@@ -129,12 +129,12 @@ else
 
     # O banco é arquivado somente na inicialização da campanha. Em uma retomada,
     # ele não pode ser movido, pois contém as coletas já concluídas.
-    if [[ -f "${FULL_PATH}/icarus.db" ]]; then
-        BACKUP_DB="${FULL_PATH}/icarus_$(date +'%Y%m%d_%H%M%S').db"
+    if [[ -f "${FULL_PATH}/${Filename}.db" ]]; then
+        BACKUP_DB="${FULL_PATH}/${Filename}_$(date +'%Y%m%d_%H%M%S').db"
         info "Armazenando o banco anterior como: $BACKUP_DB"
-        mv -- "${FULL_PATH}/icarus.db" "$BACKUP_DB"
+        mv -- "${FULL_PATH}/${Filename}.db" "$BACKUP_DB"
     else
-        info "Nenhum banco anterior encontrado em ${FULL_PATH}/icarus.db"
+        info "Nenhum banco anterior encontrado em ${FULL_PATH}/${Filename}.db"
     fi
 fi
 
@@ -419,8 +419,8 @@ CONCLUIDOS_ADV_INICIAIS="$(count_checkpoints adversarial)"
 CONCLUIDOS_OTI_INICIAIS="$(count_checkpoints otimizado)"
 
 if (( CONCLUIDOS_ADV_INICIAIS + CONCLUIDOS_OTI_INICIAIS > 0 )) && \
-   [[ ! -f "${FULL_PATH}/icarus.db" ]]; then
-    fatal "existem checkpoints concluídos, mas o banco ${FULL_PATH}/icarus.db não existe; restaure o banco correspondente antes de retomar"
+   [[ ! -f "${FULL_PATH}/${Filename}.db" ]]; then
+    fatal "existem checkpoints concluídos, mas o banco ${FULL_PATH}/${Filename}.db não existe; restaure o banco correspondente antes de retomar"
 fi
 
 cat <<SUMMARY

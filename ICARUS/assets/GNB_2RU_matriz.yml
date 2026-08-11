@@ -10,7 +10,7 @@ cu_up:
     ciphering_enable: false
 
 ru_ofh:
-  ignore_ecpri_seq_id: true
+  ignore_ecpri_seq_id: false
   t1a_max_cp_dl: 470
   t1a_min_cp_dl: 250
   t1a_max_cp_ul: 300
@@ -67,6 +67,8 @@ cell_cfg:
     nof_dl_symbols: 6
     nof_ul_slots: 2
     nof_ul_symbols: 4
+  pdsch:
+    max_pdschs_per_slot: 1
 
 cells:
   - pci: 0
@@ -101,6 +103,7 @@ test_mode:
   test_ue:
     rnti: 0x44
     nof_ues: 8
+    ue_creation_stagger_slots: 100
     ri: 1
     cqi: 7
     pusch_active: true
@@ -115,10 +118,10 @@ expert_execution:
   threads:
     upper_phy:
       pdsch_processor_type: flexible
-      pdsch_cb_batch_length: synchronous
+      pdsch_cb_batch_length: 4
       max_pucch_concurrency: 1
       max_pusch_and_srs_concurrency: 1
-      max_pdsch_concurrency: 1
+      max_pdsch_concurrency: 3
     lower_phy:
       execution_profile: dual
 
@@ -127,7 +130,7 @@ expert_execution:
     cu_up_ul_ue_executor_queue_size: 8192
     cu_up_ctrl_ue_executor_queue_size: 8192
     cu_up_strand_batch_size: 256
-    du_ue_data_executor_queue_size: 16384
+    du_ue_data_executor_queue_size: 32768
 
 log:
   filename: "__GNB_LOG_FILENAME__"
