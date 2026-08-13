@@ -17,9 +17,8 @@ O ICARUS foi desenvolvido para:
 
 - processar registros públicos de estações da ANATEL;
 - representar estações como O-RUs e possíveis localizações de O-DUs;
-- gerar associações O-RU–O-DU por meio de otimização ILP;
-- produzir um cenário adversarial para estressar a topologia otimizada;
-- configurar automaticamente O-DUs e emuladores de O-RU;
+- gerar dois cenários de associações O-RU–O-DU por meio de otimização ILP: uma otimizada e outra por estresse;
+- configurar automaticamente O-DUs e emuladores de O-RU seguindo as associações geradas pelo ILP;
 - aplicar atrasos de fronthaul proporcionais às distâncias geográficas;
 - executar os cenários em condições controladas;
 - coletar métricas de CPU, memória, energia e rede;
@@ -40,7 +39,7 @@ Matriz de distâncias e cargas das O-RUs
           +---------------------------+
           |                           |
           v                           v
-Cenário otimizado por ILP     Cenário adversarial
+Cenário otimizado            Cenário estressado
           |                           |
           +-------------+-------------+
                         |
@@ -68,7 +67,7 @@ O roteiro abaixo considera uma instalação limpa do:
 - kernel Ubuntu Real-time;
 - OCUDU compilado sem DPDK;
 - Python gerenciado com Poetry e pipx;
-- solver COIN-OR CBC;
+- Solver Gurobi;
 - Intel oneAPI MKL;
 - AOCL FFTZ;
 - `tuned` com perfil de desempenho do srsRAN.
@@ -89,7 +88,10 @@ Desabilite serviços que podem introduzir atividade em segundo plano durante os 
 sudo systemctl disable --now fwupd.service
 sudo systemctl disable --now udisks2.service
 sudo systemctl disable --now upower.service
-
+sudo systemctl disable --now ModemManager
+sudo systemctl disable --now canonical-livepatchd
+sudo systemctl disable --now snapd
+sudo systemctl disable --now unattended-upgrades
 sudo apt purge -y fwupd udisks2 upower
 ```
 
@@ -108,8 +110,6 @@ sudo apt-get install -y \
     build-essential \
     ccache \
     cmake \
-    coinor-cbc \
-    coinor-libcbc-dev \
     gcc \
     g++ \
     git \
@@ -367,6 +367,8 @@ poetry --version
 
 ## 12. Instalação do ICARUS
 
+Instalar o Solver Gurobi (https://www.gurobi.com/)
+
 Clone o repositório:
 
 ```bash
@@ -414,17 +416,15 @@ Execute o primeiro estágio do pipeline:
 
 ```bash
 poetry run python ICARUS/src/01_filter_group_csv_ANATEL.py
+poetry run python ICARUS/src/02_ilp_scenarios.py
+poetry run python ICARUS/src/03_1_check_scenarios.py
+poetry run python ICARUS/src/03_2_table_auxiliar.py
+poetry run python ICARUS/src/03_3_maps.py
+poetry run python ICARUS/src/03_4_stats.py
+poetry run python ICARUS/src/04_generate_pipeline.py
 ```
 
-> Confirme a capitalização e o caminho dos diretórios após clonar o projeto. Em sistemas Linux, `ICARUS` e `ICARRUS` são nomes diferentes.
-
-Os estágios seguintes devem ser executados conforme a numeração e a organização disponíveis em `ICARUS/src`.
-
-Exemplo genérico:
-
-```bash
-poetry run python ICARUS/src/<script.py>
-```
+O script bash `05_run_pipeline_ICARUS.sh ` deve ser executado no servidor ICARUS como root. Ele ler os dois arquivos pipelines gerados para cada cenário e para cada linha de cada arquivo, executar o `run_topology.sh ` que monta a topologia, coleta as métricas e as armazena no SQLLite através do script ` get_gnbemu_kpi.py ` , e desmonta a topologia.
 
 Os scripts Bash devem receber permissão de execução quando necessário:
 
@@ -432,19 +432,10 @@ Os scripts Bash devem receber permissão de execução quando necessário:
 chmod +x caminho/do/script.sh
 ```
 
-E podem ser executados com:
-
-```bash
-sudo ./caminho/do/script.sh
-```
-
-## Cenários experimentais
-
 ### Cenário otimizado
 
 O cenário otimizado é produzido por um modelo ILP. A formulação considera restrições como:
 
-- associação de cada O-RU a uma única O-DU;
 - distância máxima entre O-RU e O-DU;
 - capacidade agregada da O-DU;
 - quantidade máxima de O-RUs por O-DU;
@@ -453,7 +444,7 @@ O cenário otimizado é produzido por um modelo ILP. A formulação considera re
 
 A otimização é realizada de forma lexicográfica. Primeiro, determina-se a menor quantidade viável de O-DUs. Em seguida, essa quantidade é fixada e o objetivo secundário do cenário é otimizado.
 
-### Cenário adversarial
+### Cenário estressado
 
 O cenário adversarial mantém as condições estruturais necessárias para permitir comparação com o cenário otimizado, mas reorganiza deliberadamente as associações O-RU–O-DU para aumentar o estresse da topologia.
 
@@ -461,8 +452,6 @@ O estresse é introduzido principalmente por:
 
 - maior desbalanceamento de largura de banda entre O-DUs;
 - concentração de carga em determinados clusters;
-- utilização de enlaces O-RU–O-DU mais longos;
-- aumento do atraso de propagação aplicado no fronthaul;
 - distribuição menos favorável dos recursos computacionais.
 
 O cenário adversarial não representa uma alternativa mais eficiente. Ele funciona como um caso de estresse controlado, utilizado para avaliar a sensibilidade das métricas às alterações de posicionamento e associação.
@@ -474,17 +463,16 @@ O pipeline do ICARUS executa, em linhas gerais, as seguintes etapas:
 1. leitura e tratamento dos dados da ANATEL;
 2. consolidação das estações e larguras de banda;
 3. cálculo das distâncias geográficas;
-4. geração do cenário otimizado;
-5. geração do cenário adversarial;
-6. exportação das associações O-RU–O-DU;
-7. geração das configurações YAML;
-8. criação das interfaces e namespaces de rede;
-9. configuração dos atrasos de fronthaul;
-10. inicialização das O-DUs e dos emuladores de O-RU;
-11. coleta de métricas;
-12. repetição das rodadas experimentais;
-13. armazenamento dos resultados no banco SQLite;
-14. geração de arquivos e mapas para análise.
+4. geração dos cenários otimizado e estressado;
+5. exportação das associações O-RU–O-DU;
+6. geração das configurações YAML;
+7. criação das interfaces e namespaces de rede;
+8. configuração dos atrasos de fronthaul;
+9. inicialização das O-DUs e dos emuladores de O-RU;
+10. coleta de métricas;
+11. repetição das rodadas experimentais;
+12. armazenamento dos resultados no banco SQLite;
+13. geração de arquivos e mapas para análise.
 
 ## Banco de dados
 
@@ -541,7 +529,7 @@ ICARUS/
 - O kernel Real-time depende do Ubuntu Pro.
 - O OpenStreetMap e outros provedores externos podem ser utilizados na geração de mapas; recomenda-se manter cache local para garantir reprodutibilidade.
 - As coordenadas de entrada devem estar em formato numérico válido.
-- A distância geográfica representa uma aproximação da extensão do enlace físico.
+- A distância geodesíca representa uma aproximação da extensão do enlace físico.
 - O atraso de propagação não contempla necessariamente filas, comutação, sincronização ou processamento.
 - As métricas devem ser interpretadas comparativamente entre cenários executados sob condições equivalentes.
 
