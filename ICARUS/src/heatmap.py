@@ -13,14 +13,6 @@ from dotenv import find_dotenv, load_dotenv
 from ICARUS.util.sqlite import init_db, upsert_scenario
 load_dotenv(find_dotenv())
 
-ODU_ORDER = [
-    "690407114", "690458657", "690459122", "690459980", "690461070",
-    "690463014", "692131680", "692374523", "692574816", "692904158",
-    "1013177182", "1014454465", "1014454490", "1014454570",
-    "1014510071", "1014779046", "1016874984", "1016903836",
-    "1017043407",
-]
-
 METRICS = [
     ("cpu_usage", "CPU"),
     ("cpu_package_power", "Power"),
@@ -38,12 +30,24 @@ def load_associations(path: Path) -> pd.DataFrame:
         raise ValueError(f"Colunas ausentes em {path.name}: {required - set(df.columns)}")
     if len(df) != 83 or df["NumEstacao"].nunique() != 83:
         raise ValueError(f"{path.name} deve conter 83 O-RUs únicas")
-    if set(df["O-DU"].unique()) != set(ODU_ORDER):
-        raise ValueError(f"Conjunto inesperado de O-DUs em {path.name}")
     return df
 
+def get_odu_order(
+    optimized: pd.DataFrame,
+    stress: pd.DataFrame,
+) -> list[str]:
+    optimized_odus = set(optimized["O-DU"])
+    stress_odus = set(stress["O-DU"])
 
-def structure(assoc: pd.DataFrame, dm: pd.DataFrame) -> pd.DataFrame:
+    if optimized_odus != stress_odus:
+        raise ValueError(
+            "Os cenários otimizado e adversarial possuem conjuntos diferentes de O-DUs"
+        )
+
+    # Preserva a ordem em que as O-DUs aparecem no CSV otimizado.
+    return list(dict.fromkeys(optimized["O-DU"]))
+
+def structure(assoc: pd.DataFrame, dm: pd.DataFrame, odu_order: list[str]) -> pd.DataFrame:
     distances = []
     for ru, odu in assoc[["NumEstacao", "O-DU"]].itertuples(index=False, name=None):
         ru, odu = str(ru), str(odu)
@@ -56,10 +60,10 @@ def structure(assoc: pd.DataFrame, dm: pd.DataFrame) -> pd.DataFrame:
         link_km=("distance_km", "sum"),
     )
     out["ues"] = out["rus"] * 8
-    return out.reindex(ODU_ORDER)
+    return out.reindex(odu_order)
 
 
-def operational(db_path: Path) -> pd.DataFrame:
+def operational(db_path: Path, odu_order: list[str]) -> pd.DataFrame:
     con = sqlite3.connect(db_path)
     integrity = con.execute("PRAGMA integrity_check").fetchone()[0]
     if integrity != "ok":
@@ -72,11 +76,25 @@ def operational(db_path: Path) -> pd.DataFrame:
     """
     raw = pd.read_sql_query(query, con)
     con.close()
+    n_odus = len(odu_order)
+    expected_scenario_rounds = 40
+
     coverage = raw.groupby(["cenario", "roundtrip"])["cluster_id"].nunique()
-    if len(coverage) != 40 or not (coverage == 19).all():
-        raise ValueError("O banco não contém 20 rodadas completas com 19 O-DUs por cenário")
-    means = raw.groupby(["cluster_id", "cenario", "metric"])["value"].mean().unstack([1, 2])
-    return means.reindex(ODU_ORDER)
+    if (
+        len(coverage) != expected_scenario_rounds
+        or not (coverage == n_odus).all()
+    ):
+        raise ValueError(
+            f"O banco não contém 20 rodadas completas com {n_odus} O-DUs por cenário"
+        )
+
+    means = (
+        raw.groupby(["cluster_id", "cenario", "metric"])["value"]
+        .mean()
+        .unstack([1, 2])
+    )
+    means.index = means.index.astype(str)
+    return means.reindex(odu_order)
 
 
 def pct(stress: pd.Series, optimized: pd.Series) -> pd.Series:
@@ -95,17 +113,21 @@ def main() -> None:
 
     opt_a = load_associations(otimizado_path)
     str_a = load_associations(adversarial_path)
+    odu_order = get_odu_order(opt_a, str_a)
+    n_odus = len(odu_order)
     dm = pd.read_csv(dm_path, dtype={"NumEstacao": str}).set_index("NumEstacao")
     dm.columns = dm.columns.astype(str)
     if set(dm.index) != set(dm.columns) or len(dm) != 83:
         raise ValueError("A matriz de distâncias deve ser quadrada e conter as 83 estações")
 
-    opt_s, str_s = structure(opt_a, dm), structure(str_a, dm)
-    ops = operational(DB_PATH)
+    opt_s = structure(opt_a, dm, odu_order)
+    str_s = structure(str_a, dm, odu_order)
+    ops = operational(DB_PATH, odu_order)
 
-    result = pd.DataFrame(index=ODU_ORDER)
+    result = pd.DataFrame(index=odu_order)
     result.index.name = "cluster_id"
-    result["odu_num"] = range(1, 20)
+    result["odu_num"] = range(1, n_odus + 1)
+
     for col in ["rus", "ues", "load_mhz", "link_km"]:
         result[f"{col}_optimized"] = opt_s[col]
         result[f"{col}_stress"] = str_s[col]
@@ -140,7 +162,7 @@ def main() -> None:
         ax.imshow(values[:, j:j+1], cmap=cmap, norm=norm, aspect="auto",
                   extent=(j - 0.5, j + 0.5, 18.5, -0.5), interpolation="nearest")
 
-    for i in range(19):
+    for i in range(n_odus):
         for j, val in enumerate(values[i]):
             vmax = max(abs(np.nanmin(values[:, j])), abs(np.nanmax(values[:, j])), 1e-12)
             rgba = cmap(TwoSlopeNorm(vmin=-vmax, vcenter=0, vmax=vmax)(val))
@@ -150,11 +172,11 @@ def main() -> None:
             ax.text(j, i, text, ha="center", va="center", fontsize=8.2, color=color)
 
     ax.set_xticks(range(10), labels, rotation=36, ha="right", fontsize=9.5)
-    ax.set_yticks(range(19), [str(i) for i in range(1, 20)], fontsize=9.5)
+    ax.set_yticks(range(n_odus), [str(i) for i in range(1, n_odus + 1)], fontsize=9.5)
     ax.set_ylabel("O-DU", fontsize=11)
     ax.set_xlim(-0.5, 9.5); ax.set_ylim(18.5, -0.5)
     ax.set_xticks(np.arange(-0.5, 10, 1), minor=True)
-    ax.set_yticks(np.arange(-0.5, 19, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, n_odus, 1), minor=True)
     ax.grid(which="minor", color="#a8a8a8", linewidth=0.45)
     ax.tick_params(which="minor", bottom=False, left=False)
     for x in [1.5, 3.5]:
